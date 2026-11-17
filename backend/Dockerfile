@@ -15,6 +15,8 @@ RUN uv sync --locked --no-dev
 
 COPY app ./app
 
+COPY config ./config
+
 RUN useradd --create-home appuser && chown -R appuser /app
 USER appuser
 

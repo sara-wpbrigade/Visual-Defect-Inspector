@@ -43,10 +43,12 @@ def predict(ckpt_path: Path, image_path: Path) -> None:
     anomaly_map = np.asarray(batch.anomaly_map[0].squeeze().cpu())
     out_path = OUTPUT_DIR / f"{image_path.parent.name}_{image_path.stem}_overlay.png"
     save_overlay(image_path, anomaly_map, out_path)
+    area = float(batch.pred_mask[0].float().mean())
     logger.info(
-        "score=%.4f label=%d overlay=%s",
+        "score=%.4f label=%d area=%.4f overlay=%s",
         float(batch.pred_score[0]),
         int(batch.pred_label[0]),
+        area,
         out_path,
     )
 

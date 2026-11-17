@@ -1,5 +1,6 @@
 .env
 .venv/
+.venv
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -9,3 +10,5 @@ htmlcov/
 node_modules/
 data/
 uploads/
+results/
+lightning_logs/

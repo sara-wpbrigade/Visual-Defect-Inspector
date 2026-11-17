@@ -1,0 +1,10 @@
+{
+    "name": "factory_qc_operator",
+    "defect_types": ["scratch", "crack", "dent", "contamination"],
+    "decision_cutoff": 0.5,
+    "review_margin": 0.1,
+    "severity_bands": {"low_max": 0.02, "medium_max": 0.12},
+    "on_pass": "accept",
+    "on_uncertain": "re_inspect",
+    "on_defect": {"low": "rework", "medium": "rework", "high": "reject"}
+  }
