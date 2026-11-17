@@ -5,6 +5,9 @@ services:
       - "8000:8000"
     env_file:
       - ./backend/.env
+    volumes:
+      - ./backend/results:/app/results:ro
+      - ./backend/data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s

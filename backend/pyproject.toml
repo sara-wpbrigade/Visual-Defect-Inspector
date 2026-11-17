@@ -13,6 +13,7 @@ dependencies = [
     "google-genai>=3.3.0",
     "numpy>=2.5.5",
     "pydantic-settings>=2.11.0",
+    "python-multipart>=0.0.34",
     "uvicorn[standard]>=0.39.0",
 ]
 

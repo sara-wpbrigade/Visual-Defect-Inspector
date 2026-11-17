@@ -42,3 +42,16 @@ class Assessment(BaseModel):
     severity: Severity
     area_ratio: float = Field(ge=0, le=1)
     action: Action
+
+
+class InspectionOutcome(BaseModel):
+    """The detector score plus the rules assessment, before storage."""
+
+    score: float = Field(ge=0)
+    assessment: Assessment
+
+
+class InspectionResult(InspectionOutcome):
+    """One finished inspection as returned by the API."""
+
+    inspection_id: str = Field(min_length=1)

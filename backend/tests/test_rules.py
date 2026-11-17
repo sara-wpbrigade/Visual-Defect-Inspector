@@ -8,23 +8,6 @@ from app.core.persona import PersonaConfig, load_persona
 from app.schemas import Action, Severity, Verdict
 from app.services import rules
 
-PERSONA_DATA = {
-    "name": "test_persona",
-    "defect_types": ["scratch"],
-    "decision_cutoff": 0.5,
-    "review_margin": 0.1,
-    "severity_bands": {"low_max": 0.01, "medium_max": 0.05},
-    "on_pass": "accept",
-    "on_uncertain": "re_inspect",
-    "on_defect": {"low": "rework", "medium": "rework", "high": "reject"},
-}
-
-
-@pytest.fixture
-def persona() -> PersonaConfig:
-    """A fixed persona, so tests do not depend on the tuned config file."""
-    return PersonaConfig.model_validate(PERSONA_DATA)
-
 
 def make_mask(flagged: int, total: int = 100) -> np.ndarray:
     """Build a flat boolean mask with `flagged` pixels set."""
@@ -103,8 +86,8 @@ def test_persona_name_blocks_path_traversal() -> None:
         load_persona("../secrets")
 
 
-def test_persona_rejects_unordered_bands() -> None:
+def test_persona_rejects_unordered_bands(persona_data: dict[str, object]) -> None:
     """Severity bands must increase."""
-    bad = {**PERSONA_DATA, "severity_bands": {"low_max": 0.1, "medium_max": 0.05}}
+    bad = {**persona_data, "severity_bands": {"low_max": 0.1, "medium_max": 0.05}}
     with pytest.raises(ValidationError):
         PersonaConfig.model_validate(bad)
