@@ -4,22 +4,27 @@ import io
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from PIL import Image
 from pydantic import SecretStr
 
-from app.api.dependencies import get_detector, get_persona
-from app.core.config import Settings, get_settings
+from app.api.dependencies import get_detector, get_persona, get_report_service
+from app.core.config import ReportWriterKind, Settings, get_settings
 from app.core.persona import PersonaConfig
 from app.main import app
 from app.models.detector import Detection
+from app.models.template_writer import TemplateReportWriter
+from app.services.report import ReportService
 from tests.fakes import StubDetector
 
 PNG_CONTENT_TYPE = "image/png"
 TINY_BYTE_LIMIT = 20
 TINY_PIXEL_LIMIT = 100
+TEMPLATE_MAX_ATTEMPTS = 1
+DEFAULT_MAX_TRANSCRIPT_CHARS = 1000
 
 DetectionFactory = Callable[..., Detection]
 
@@ -50,6 +55,13 @@ def api_factory(tmp_path: Path, persona: PersonaConfig) -> Iterator[Callable[...
         app.dependency_overrides[get_settings] = lambda: settings
         app.dependency_overrides[get_persona] = lambda: persona
         app.dependency_overrides[get_detector] = lambda: StubDetector(result)
+        app.dependency_overrides[get_report_service] = lambda: ReportService(
+            writer=TemplateReportWriter(),
+            fallback_writer=TemplateReportWriter(),
+            persona=persona,
+            max_attempts=TEMPLATE_MAX_ATTEMPTS,
+            max_transcript_chars=DEFAULT_MAX_TRANSCRIPT_CHARS,
+        )
         return TestClient(app)
 
     yield build
@@ -66,6 +78,24 @@ def test_defect_returns_reject(
     assert body["assessment"]["verdict"] == "defect"
     assert body["assessment"]["severity"] == "high"
     assert body["assessment"]["action"] == "reject"
+    assert body["assessment"]["location"] is None
+    report = body["report"]
+    assert report["report_id"] == body["inspection_id"]
+    assert report["persona"] == "test_persona"
+    assert report["source"] == "template"
+    assert report["content"]["defect_type"] is None
+    assert report["content"]["recommendations"] == ["Reject the item and remove it from the batch."]
+
+
+def test_defect_location_is_returned(api_factory: Callable[..., TestClient]) -> None:
+    """A two-dimensional mask gives the report a grid cell and a box."""
+    mask = np.zeros((10, 10), dtype=bool)
+    mask[0:2, 0:2] = True
+    detection = Detection(score=0.9, anomaly_map=mask.astype(np.float32), mask=mask)
+    body = upload(api_factory(detection), make_png()).json()
+    location = body["assessment"]["location"]
+    assert location["region"] == "upper left"
+    assert location["bbox"] == [0.0, 0.0, 0.2, 0.2]
 
 
 def test_pass_returns_accept(
@@ -77,6 +107,23 @@ def test_pass_returns_accept(
     assert body["assessment"]["verdict"] == "pass"
     assert body["assessment"]["action"] == "accept"
     assert body["assessment"]["needs_review"] is False
+    assert body["report"]["source"] == "template"
+    assert body["report"]["content"]["defect_type"] is None
+    assert body["report"]["content"]["recommendations"] == ["Accept the item; no action is needed."]
+
+
+def test_template_report_runs_without_gemini_credentials(
+    api_factory: Callable[..., TestClient], detection_factory: DetectionFactory
+) -> None:
+    """The template writer needs no Gemini key or model."""
+    client = api_factory(
+        detection_factory(0.2),
+        report_writer=ReportWriterKind.TEMPLATE,
+        gemini_api_key=None,
+        gemini_model=None,
+    )
+    body = upload(client, make_png()).json()
+    assert body["report"]["source"] == "template"
 
 
 def test_photo_is_stored_under_the_inspection_id(

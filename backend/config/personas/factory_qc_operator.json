@@ -1,10 +1,21 @@
 {
-    "name": "factory_qc_operator",
-    "defect_types": ["scratch", "crack", "dent", "contamination"],
-    "decision_cutoff": 0.5,
-    "review_margin": 0.1,
-    "severity_bands": {"low_max": 0.02, "medium_max": 0.12},
-    "on_pass": "accept",
-    "on_uncertain": "re_inspect",
-    "on_defect": {"low": "rework", "medium": "rework", "high": "reject"}
+  "name": "factory_qc_operator",
+  "defect_types": ["scratch", "crack", "dent", "contamination", "broken_part"],
+  "decision_cutoff": 0.5,
+  "review_margin": 0.1,
+  "severity_bands": {"low_max": 0.02, "medium_max": 0.12},
+  "on_pass": "accept",
+  "on_uncertain": "re_inspect",
+  "on_defect": {"low": "rework", "medium": "rework", "high": "reject"},
+  "report": {
+    "audience": "factory QC operator on a production line",
+    "tone": "short, technical, decision first",
+    "language": "English"
+  },
+  "action_text": {
+    "accept": "Accept the item; no action is needed.",
+    "rework": "Send the item to rework and re-inspect it after repair.",
+    "reject": "Reject the item and remove it from the batch.",
+    "re_inspect": "Re-inspect the item manually; the automatic result is too close to call."
   }
+}

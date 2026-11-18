@@ -26,6 +26,14 @@ class SeverityBands(BaseModel):
         return self
 
 
+class PersonaReport(BaseModel):
+    """How a report should read for this persona."""
+
+    audience: str = Field(min_length=1)
+    tone: str = Field(min_length=1)
+    language: str = Field(min_length=1)
+
+
 class PersonaConfig(BaseModel):
     """Everything that makes one user type behave differently from another."""
 
@@ -37,6 +45,8 @@ class PersonaConfig(BaseModel):
     on_pass: Action
     on_uncertain: Action
     on_defect: dict[Severity, Action]
+    report: PersonaReport
+    action_text: dict[Action, str]
 
     @field_validator("on_defect")
     @classmethod
@@ -45,6 +55,17 @@ class PersonaConfig(BaseModel):
         missing = set(DEFECT_SEVERITIES) - set(value)
         if missing:
             raise ValueError(f"on_defect is missing: {sorted(missing)}")
+        return value
+
+    @field_validator("action_text")
+    @classmethod
+    def check_all_actions(cls, value: dict[Action, str]) -> dict[Action, str]:
+        """Require one non-empty sentence for every action."""
+        missing = set(Action) - set(value)
+        if missing:
+            raise ValueError(f"action_text is missing: {sorted(missing)}")
+        if any(not sentence.strip() for sentence in value.values()):
+            raise ValueError("action_text sentences must not be empty")
         return value
 
 

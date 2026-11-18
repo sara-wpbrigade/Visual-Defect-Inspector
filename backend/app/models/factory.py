@@ -1,7 +1,11 @@
-"""Pick the detector implementation named by configuration."""
+"""Pick the detector and report-writer implementations named by configuration."""
 
-from app.core.config import Settings
+from app.core.config import MILLISECONDS_PER_SECOND, ReportWriterKind, Settings
 from app.models.detector import Detector
+from app.models.report_writer import ReportWriter
+from app.models.template_writer import TemplateReportWriter
+
+GEMINI_SETTINGS_ERROR = "Gemini report writing requires GEMINI_API_KEY and GEMINI_MODEL."
 
 
 def create_detector(settings: Settings) -> Detector:
@@ -13,3 +17,30 @@ def create_detector(settings: Settings) -> Detector:
     from app.models.patchcore import PatchCoreDetector
 
     return PatchCoreDetector(settings.checkpoint_path, settings.detector_device)
+
+
+def create_report_writer(settings: Settings) -> ReportWriter:
+    """Return the configured report writer, importing the Google SDK only if needed."""
+    if settings.report_writer is ReportWriterKind.TEMPLATE:
+        return TemplateReportWriter()
+    if settings.gemini_api_key is None or settings.gemini_model is None:
+        raise ValueError(GEMINI_SETTINGS_ERROR)
+    from google import genai
+    from google.genai import types
+
+    from app.models.gemini_writer import GeminiReportWriter
+
+    timeout_ms = int(settings.report_timeout_seconds * MILLISECONDS_PER_SECOND)
+    client = genai.Client(
+        api_key=settings.gemini_api_key.get_secret_value(),
+        http_options=types.HttpOptions(
+            api_version=settings.gemini_api_version,
+            timeout=timeout_ms,
+        ),
+    )
+    return GeminiReportWriter(
+        client,
+        settings.gemini_model,
+        image_max_side=settings.report_image_max_side,
+        include_image=settings.report_include_image,
+    )

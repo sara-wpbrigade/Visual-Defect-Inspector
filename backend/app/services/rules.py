@@ -3,9 +3,21 @@
 import numpy as np
 
 from app.core.persona import PersonaConfig, SeverityBands
-from app.schemas import Action, Assessment, Severity, Verdict
+from app.schemas import Action, Assessment, DefectLocation, Severity, Verdict
 
 BASE_CONFIDENCE = 0.5
+GRID_SIDE = 3
+GRID_REGIONS = (
+    "upper left",
+    "upper center",
+    "upper right",
+    "middle left",
+    "center",
+    "middle right",
+    "lower left",
+    "lower center",
+    "lower right",
+)
 
 
 def area_ratio(mask: np.ndarray) -> float:
@@ -13,6 +25,33 @@ def area_ratio(mask: np.ndarray) -> float:
     if mask.size == 0:
         raise ValueError("Mask must not be empty.")
     return float(np.count_nonzero(mask)) / mask.size
+
+
+def locate_defect(mask: np.ndarray) -> DefectLocation | None:
+    """Return the grid cell and normalized box of the flagged pixels.
+
+    A one-dimensional mask has no location, so it returns None.
+    """
+    if mask.ndim != 2 or not np.any(mask):
+        return None
+    rows, columns = np.nonzero(mask)
+    height, width = mask.shape
+    bbox = (
+        float(columns.min()) / width,
+        float(rows.min()) / height,
+        float(columns.max() + 1) / width,
+        float(rows.max() + 1) / height,
+    )
+    return DefectLocation(region=_grid_region(rows, columns, height, width), bbox=bbox)
+
+
+def _grid_region(rows: np.ndarray, columns: np.ndarray, height: int, width: int) -> str:
+    """Map the centroid of the flagged pixels to one of the nine grid labels."""
+    center_x = (float(columns.mean()) + 0.5) / width
+    center_y = (float(rows.mean()) + 0.5) / height
+    column_index = min(int(center_x * GRID_SIDE), GRID_SIDE - 1)
+    row_index = min(int(center_y * GRID_SIDE), GRID_SIDE - 1)
+    return GRID_REGIONS[row_index * GRID_SIDE + column_index]
 
 
 def decide_verdict(score: float, persona: PersonaConfig) -> Verdict:
@@ -61,6 +100,7 @@ def assess(score: float, mask: np.ndarray, persona: PersonaConfig) -> Assessment
         else classify_severity(ratio, persona.severity_bands)
     )
     review = needs_review(score, persona)
+    location = locate_defect(mask) if verdict is Verdict.DEFECT else None
     return Assessment(
         verdict=verdict,
         confidence=compute_confidence(score, persona),
@@ -68,4 +108,5 @@ def assess(score: float, mask: np.ndarray, persona: PersonaConfig) -> Assessment
         severity=severity,
         area_ratio=ratio,
         action=decide_action(verdict, severity, review, persona),
+        location=location,
     )
