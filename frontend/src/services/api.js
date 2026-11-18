@@ -15,6 +15,8 @@ import {
 
 const INSPECTIONS_PATH = '/inspections';
 const DEFAULT_BASE_URL = '';
+const BBOX_LENGTH = 4;
+const REPORT_SOURCES = ['ai', 'template'];
 const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/$/, '');
 
 export class ApiError extends Error {
@@ -34,7 +36,7 @@ export class ApiError extends Error {
  * Send one photo to POST /inspections and return the inspection facts.
  *
  * @param {File} file
- * @returns {Promise<{ inspectionId: string, score: number, assessment: object }>}
+ * @returns {Promise<{ inspectionId: string, score: number, assessment: object, report: object }>}
  * @throws {ApiError} When the request fails or the response is malformed.
  */
 export async function createInspection(file) {
@@ -87,6 +89,71 @@ function detailMessage(detail) {
   return messages.length > 0 ? messages.join(' ') : null;
 }
 
+/** True for a plain JSON object. */
+function isObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** True for the API's optional text fields: a string or null. */
+function isNullableString(value) {
+  return value === null || typeof value === 'string';
+}
+
+/** True for a non-empty list of strings, the report's findings and recommendations. */
+function isNonEmptyStringList(value) {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((item) => typeof item === 'string' && item.length > 0)
+  );
+}
+
+/** True for a normalized [x_min, y_min, x_max, y_max] box inside the photo. */
+function isBbox(value) {
+  return (
+    Array.isArray(value) &&
+    value.length === BBOX_LENGTH &&
+    value.every(
+      (coordinate) => typeof coordinate === 'number' && coordinate >= 0 && coordinate <= 1,
+    )
+  );
+}
+
+/** True for the defect location: a region name and a normalized box, or null. */
+function isLocation(value) {
+  if (value === null) {
+    return true;
+  }
+  return (
+    isObject(value) &&
+    typeof value.region === 'string' &&
+    value.region.length > 0 &&
+    isBbox(value.bbox)
+  );
+}
+
+/** True for the report block: identity, source and the validated content. */
+function isReport(value) {
+  if (!isObject(value)) {
+    return false;
+  }
+  const content = value.content;
+  return (
+    typeof value.report_id === 'string' &&
+    typeof value.generated_at === 'string' &&
+    typeof value.persona === 'string' &&
+    REPORT_SOURCES.includes(value.source) &&
+    isNullableString(value.manual_review_notice) &&
+    isObject(content) &&
+    typeof content.summary === 'string' &&
+    content.summary.length > 0 &&
+    isNonEmptyStringList(content.findings) &&
+    isNonEmptyStringList(content.recommendations) &&
+    isNullableString(content.defect_type) &&
+    isNullableString(content.voice_note_conflict)
+  );
+}
+
 /** Convert the API body into the camelCase model the components use. */
 function normalizeInspection(body, status) {
   const assessment = body?.assessment;
@@ -98,7 +165,9 @@ function normalizeInspection(body, status) {
     typeof assessment.needs_review === 'boolean' &&
     typeof assessment.severity === 'string' &&
     typeof assessment.area_ratio === 'number' &&
-    typeof assessment.action === 'string';
+    typeof assessment.action === 'string' &&
+    isLocation(assessment.location) &&
+    isReport(body.report);
   if (!valid) {
     throw new ApiError(UNEXPECTED_RESPONSE_MESSAGE, { status, detail: body });
   }
@@ -112,6 +181,34 @@ function normalizeInspection(body, status) {
       severity: assessment.severity,
       areaRatio: assessment.area_ratio,
       action: assessment.action,
+      location: normalizeLocation(assessment.location),
+    },
+    report: normalizeReport(body.report),
+  };
+}
+
+/** Convert the defect location to camelCase, keeping the box as a plain array. */
+function normalizeLocation(location) {
+  if (location === null) {
+    return null;
+  }
+  return { region: location.region, bbox: [...location.bbox] };
+}
+
+/** Convert the report block to camelCase for the result card. */
+function normalizeReport(report) {
+  return {
+    reportId: report.report_id,
+    generatedAt: report.generated_at,
+    persona: report.persona,
+    source: report.source,
+    manualReviewNotice: report.manual_review_notice,
+    content: {
+      summary: report.content.summary,
+      findings: [...report.content.findings],
+      recommendations: [...report.content.recommendations],
+      defectType: report.content.defect_type,
+      voiceNoteConflict: report.content.voice_note_conflict,
     },
   };
 }

@@ -20,6 +20,21 @@ const API_PAYLOAD = {
     severity: 'high',
     area_ratio: 0.175,
     action: 'reject',
+    location: { region: 'lower center', bbox: [0.348, 0.305, 0.895, 0.93] },
+  },
+  report: {
+    report_id: 'abc123',
+    generated_at: '2026-11-18T08:07:19.671664Z',
+    persona: 'factory_qc_operator',
+    source: 'ai',
+    manual_review_notice: null,
+    content: {
+      summary: 'A high severity defect covers the lower center of the item.',
+      findings: ['The flagged area covers 17.5% of the item.'],
+      recommendations: ['Reject the item and keep it out of the batch.'],
+      defect_type: 'contamination',
+      voice_note_conflict: null,
+    },
   },
 };
 
@@ -33,6 +48,21 @@ const VIEW_MODEL = {
     severity: 'high',
     areaRatio: 0.175,
     action: 'reject',
+    location: { region: 'lower center', bbox: [0.348, 0.305, 0.895, 0.93] },
+  },
+  report: {
+    reportId: 'abc123',
+    generatedAt: '2026-11-18T08:07:19.671664Z',
+    persona: 'factory_qc_operator',
+    source: 'ai',
+    manualReviewNotice: null,
+    content: {
+      summary: 'A high severity defect covers the lower center of the item.',
+      findings: ['The flagged area covers 17.5% of the item.'],
+      recommendations: ['Reject the item and keep it out of the batch.'],
+      defectType: 'contamination',
+      voiceNoteConflict: null,
+    },
   },
 };
 
@@ -55,6 +85,21 @@ function stubFetch(response) {
   return fetchMock;
 }
 
+/** Build a payload with one field of the assessment changed. */
+function withAssessment(patch) {
+  return { ...API_PAYLOAD, assessment: { ...API_PAYLOAD.assessment, ...patch } };
+}
+
+/** Build a payload with one field of the report changed. */
+function withReport(patch) {
+  return { ...API_PAYLOAD, report: { ...API_PAYLOAD.report, ...patch } };
+}
+
+/** Build a payload with one field of the report content changed. */
+function withContent(patch) {
+  return withReport({ content: { ...API_PAYLOAD.report.content, ...patch } });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -71,6 +116,28 @@ describe('createInspection', () => {
     expect(options.body).toBeInstanceOf(FormData);
     expect(options.body.get('image')).toBe(photo);
     expect(options.headers).toBeUndefined();
+  });
+
+  it('keeps a pass without a location and a template report', async () => {
+    const payload = withReport({
+      source: 'template',
+      manual_review_notice: 'This result is close to the cutoff. Review it manually.',
+      content: {
+        ...API_PAYLOAD.report.content,
+        defect_type: null,
+        voice_note_conflict: 'The voice note points to the north edge.',
+      },
+    });
+    payload.assessment = { ...API_PAYLOAD.assessment, location: null };
+    stubFetch(jsonResponse(201, payload));
+
+    const result = await createInspection(photo);
+
+    expect(result.assessment.location).toBeNull();
+    expect(result.report.source).toBe('template');
+    expect(result.report.manualReviewNotice).toContain('Review it manually');
+    expect(result.report.content.defectType).toBeNull();
+    expect(result.report.content.voiceNoteConflict).toContain('north edge');
   });
 
   it('maps a bad image to an operator-friendly message', async () => {
@@ -146,6 +213,52 @@ describe('createInspection', () => {
 
     await expect(createInspection(photo)).rejects.toMatchObject({
       name: 'ApiError',
+      message: UNEXPECTED_RESPONSE_MESSAGE,
+    });
+  });
+
+  it('rejects a report with an unknown source or missing content', async () => {
+    stubFetch(jsonResponse(201, { ...API_PAYLOAD, report: null }));
+    await expect(createInspection(photo)).rejects.toMatchObject({
+      message: UNEXPECTED_RESPONSE_MESSAGE,
+    });
+
+    stubFetch(jsonResponse(201, withReport({ source: 'human' })));
+    await expect(createInspection(photo)).rejects.toMatchObject({
+      message: UNEXPECTED_RESPONSE_MESSAGE,
+    });
+
+    stubFetch(jsonResponse(201, withReport({ content: null })));
+    await expect(createInspection(photo)).rejects.toMatchObject({
+      message: UNEXPECTED_RESPONSE_MESSAGE,
+    });
+  });
+
+  it('rejects report lists that are empty or not text', async () => {
+    stubFetch(jsonResponse(201, withContent({ findings: [] })));
+    await expect(createInspection(photo)).rejects.toMatchObject({
+      message: UNEXPECTED_RESPONSE_MESSAGE,
+    });
+
+    stubFetch(jsonResponse(201, withContent({ recommendations: ['ok', 7] })));
+    await expect(createInspection(photo)).rejects.toMatchObject({
+      message: UNEXPECTED_RESPONSE_MESSAGE,
+    });
+  });
+
+  it('rejects a location that is missing or outside the photo', async () => {
+    stubFetch(jsonResponse(201, withAssessment({ location: undefined })));
+    await expect(createInspection(photo)).rejects.toMatchObject({
+      message: UNEXPECTED_RESPONSE_MESSAGE,
+    });
+
+    stubFetch(
+      jsonResponse(
+        201,
+        withAssessment({ location: { region: 'lower center', bbox: [0.1, 0.2, 1.4, 0.9] } }),
+      ),
+    );
+    await expect(createInspection(photo)).rejects.toMatchObject({
       message: UNEXPECTED_RESPONSE_MESSAGE,
     });
   });

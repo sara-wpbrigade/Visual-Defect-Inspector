@@ -46,6 +46,20 @@ export const ACTION_HINTS = Object.freeze({
   re_inspect: 'Inspect the item again or ask a second operator to review it.',
 });
 
+export const REPORT_SECTION_TITLE = 'Report';
+export const REPORT_SOURCE_LABELS = Object.freeze({
+  ai: 'AI-written',
+  template: 'Template (offline)',
+});
+export const REPORT_FINDINGS_TITLE = 'Findings';
+export const REPORT_RECOMMENDATIONS_TITLE = 'Recommendations';
+export const DEFECT_TYPE_LABEL = 'Defect type';
+export const DEFECT_TYPE_ESTIMATE_LABEL = 'estimated by AI';
+export const DEFECT_TYPE_NOT_DETERMINED = 'not determined';
+export const FLAGGED_AREA_LABEL = 'Flagged area';
+export const MANUAL_REVIEW_TITLE = 'Manual review required';
+export const VOICE_CONFLICT_LABEL = 'Voice note conflict';
+
 export const HTTP_BAD_REQUEST = 400;
 export const HTTP_PAYLOAD_TOO_LARGE = 413;
 export const HTTP_UNPROCESSABLE = 422;

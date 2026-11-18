@@ -23,6 +23,21 @@ const DEFECT_RESULT = {
     severity: 'high',
     areaRatio: 0.175,
     action: 'reject',
+    location: { region: 'lower center', bbox: [0.348, 0.305, 0.895, 0.93] },
+  },
+  report: {
+    reportId: 'defect123',
+    generatedAt: '2026-11-18T08:07:19.671664Z',
+    persona: 'factory_qc_operator',
+    source: 'ai',
+    manualReviewNotice: null,
+    content: {
+      summary: 'A high severity defect covers the lower center of the item.',
+      findings: ['The flagged area covers 17.5% of the item.'],
+      recommendations: ['Reject the item and keep it out of the batch.'],
+      defectType: 'contamination',
+      voiceNoteConflict: null,
+    },
   },
 };
 
@@ -36,6 +51,21 @@ const PASS_RESULT = {
     severity: 'none',
     areaRatio: 0,
     action: 'accept',
+    location: null,
+  },
+  report: {
+    reportId: 'pass123',
+    generatedAt: '2026-11-18T08:07:19.671664Z',
+    persona: 'factory_qc_operator',
+    source: 'template',
+    manualReviewNotice: null,
+    content: {
+      summary: 'No defect was found, so the item can be released.',
+      findings: ['The anomaly score is below the decision cutoff.'],
+      recommendations: ['Accept the item.'],
+      defectType: null,
+      voiceNoteConflict: null,
+    },
   },
 };
 
@@ -72,6 +102,11 @@ describe('App', () => {
     expect(screen.getByText('Defect')).toBeInTheDocument();
     expect(screen.getByText('High')).toBeInTheDocument();
     expect(screen.getByText('defect123')).toBeInTheDocument();
+    expect(screen.getByText('AI-written')).toBeInTheDocument();
+    expect(
+      screen.getByText('A high severity defect covers the lower center of the item.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Flagged area: lower center')).toBeInTheDocument();
     expect(screen.queryByText(/your result will appear here/i)).not.toBeInTheDocument();
     expect(createInspection).toHaveBeenCalledWith(photo);
   });
@@ -129,6 +164,11 @@ describe('App', () => {
         needsReview: true,
         action: 're_inspect',
       },
+      report: {
+        ...DEFECT_RESULT.report,
+        manualReviewNotice:
+          'This result is close to the decision cutoff. A second operator should review it.',
+      },
     });
     const user = userEvent.setup();
     renderApp();
@@ -137,5 +177,6 @@ describe('App', () => {
 
     expect(await screen.findByText(/needs manual review/i)).toBeInTheDocument();
     expect(screen.getByText('Re-inspect')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('Manual review required.');
   });
 });

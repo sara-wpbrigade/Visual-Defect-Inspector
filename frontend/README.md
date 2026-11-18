@@ -1,11 +1,13 @@
 # Visual Defect Inspector: frontend slice
 
-The React + Vite UI for the part of the pipeline that exists today: **photo in, QC facts out**.
-It calls `POST /inspections`, shows loading, success and error states, and renders the verdict,
-confidence, severity, flagged area, anomaly score and recommended action.
+The React + Vite UI for the part of the pipeline that exists today: **photo in, QC facts and the
+AI-written report out**. It calls `POST /inspections`, shows loading, success and error states, and
+renders the verdict, confidence, severity, flagged area, anomaly score, recommended action and the
+report: summary, findings, recommendations, the AI-estimated defect type, the flagged region and
+any manual-review or voice-note-conflict notice.
 
-Not in this slice yet: defect overlay image, inspection history, voice notes, PDF reports, batch
-view and CSV export. Those arrive with backend Steps 7 to 10.
+Not in this slice yet: defect overlay image, inspection history, voice note capture, PDF
+downloads, batch view and CSV export. Those arrive with backend Steps 7 to 11.
 
 ## Stack and layout
 
@@ -79,13 +81,31 @@ BACKEND_URL=http://127.0.0.1:9000 npm run dev
     "needs_review": false,
     "severity": "high",
     "area_ratio": 0.1750030517578125,
-    "action": "reject"
+    "action": "reject",
+    "location": { "region": "lower center", "bbox": [0.348, 0.305, 0.895, 0.93] }
+  },
+  "report": {
+    "report_id": "a390399a0ce54f6683c9231df1fdd839",
+    "generated_at": "2026-11-18T08:07:19.671664Z",
+    "persona": "factory_qc_operator",
+    "source": "ai",
+    "manual_review_notice": null,
+    "content": {
+      "summary": "A high severity defect covers the lower center of the item.",
+      "findings": ["The flagged area covers 17.5% of the item."],
+      "recommendations": ["Reject the item and keep it out of the batch."],
+      "defect_type": "contamination",
+      "voice_note_conflict": null
+    }
   }
 }
 ```
 
-`api.js` converts this to camelCase (`inspectionId`, `areaRatio`, `needsReview`) and checks the
-shape, so a broken contract becomes a visible error instead of a blank card. Errors map to
+`api.js` converts this to camelCase (`inspectionId`, `areaRatio`, `needsReview`, `location.region`,
+`reportId`, `generatedAt`, `source`, `manualReviewNotice`, `content.defectType`,
+`content.voiceNoteConflict`) and checks the shape, so a broken contract becomes a visible error
+instead of a blank card. `location` is `null` for a pass, `source` is `ai` or `template`, and
+`manual_review_notice` and `voice_note_conflict` are `null` unless they apply. Errors map to
 operator copy:
 
 | Status          | UI message                                                     |
@@ -113,18 +133,22 @@ npm run test:coverage
 npm run build
 ```
 
-Current result: **51 tests pass, 100% statements/functions/lines, 94% branches** (threshold 85%).
+Current result: **61 tests pass, 100% statements/functions/lines, 96% branches** (threshold 85%).
 Coverage HTML is written to `frontend/coverage/`.
 
 ## Testing approach
 
-- `src/services/api.test.js` covers the HTTP contract: multipart field, 201 body, 400/413/422/503,
-  network failure, non-JSON error bodies and malformed success bodies.
+- `src/services/api.test.js` covers the HTTP contract: multipart field, 201 body, the report and
+  location mapping, 400/413/422/503, network failure, non-JSON error bodies and malformed success
+  bodies (missing or invalid report, empty lists, unknown source, out-of-range location).
 - `src/hooks/useInspection.test.jsx` covers the idle → loading → success/error state machine.
 - `UploadPanel.test.jsx` covers valid/invalid/empty/oversized files, drag-and-drop, camera button,
   busy state and preview URL cleanup.
+- `ResultCard.test.jsx` covers the facts, the report section (summary, findings, recommendations,
+  AI/template badge, defect type chip and flagged region), the manual-review banner, the hidden or
+  not-determined defect type and the voice-note-conflict notice.
 - `App.test.jsx` is the integration test of the frontend flow with a mocked API: upload, loading,
-  verdict, low-confidence review warning, error and reset.
+  verdict with the report, low-confidence review warning, error and reset.
 
 The API is mocked in unit tests so they stay deterministic; the real model is exercised by the
 backend tests, by the manual flow above, and by the curl checks in the handoff.
