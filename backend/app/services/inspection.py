@@ -1,6 +1,7 @@
 """The inspection use case: one photo in, the assessed facts out."""
 
 import logging
+from dataclasses import dataclass
 
 from PIL import Image
 
@@ -16,6 +17,14 @@ class DetectionError(RuntimeError):
     """Raised when the detector cannot produce a result for an image."""
 
 
+@dataclass(frozen=True)
+class InspectionAnalysis:
+    """The assessed facts plus the raw detection needed to draw the overlay."""
+
+    outcome: InspectionOutcome
+    detection: Detection
+
+
 class InspectionService:
     """Run one photo through the detector and the persona rules."""
 
@@ -24,8 +33,8 @@ class InspectionService:
         self._detector = detector
         self._persona = persona
 
-    def inspect(self, image: Image.Image) -> InspectionOutcome:
-        """Return the detector score and the assessed facts for one photo."""
+    def inspect(self, image: Image.Image) -> InspectionAnalysis:
+        """Return the assessed facts and the raw detection for one photo."""
         detection = self._detect(image)
         assessment = rules.assess(detection.score, detection.mask, self._persona)
         logger.info(
@@ -35,7 +44,8 @@ class InspectionService:
             assessment.action,
             assessment.needs_review,
         )
-        return InspectionOutcome(score=detection.score, assessment=assessment)
+        outcome = InspectionOutcome(score=detection.score, assessment=assessment)
+        return InspectionAnalysis(outcome=outcome, detection=detection)
 
     def _detect(self, image: Image.Image) -> Detection:
         """Run the detector, turning any model failure into a domain error."""

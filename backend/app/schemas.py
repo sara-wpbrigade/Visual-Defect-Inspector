@@ -13,6 +13,7 @@ MAX_FINDING_CHARS = 240
 MAX_RECOMMENDATION_CHARS = 240
 MAX_DEFECT_TYPE_CHARS = 60
 MAX_CONFLICT_CHARS = 400
+BATCH_ID_PATTERN = r"^[A-Za-z0-9_-]{1,40}$"
 
 Finding = Annotated[str, Field(max_length=MAX_FINDING_CHARS)]
 Recommendation = Annotated[str, Field(max_length=MAX_RECOMMENDATION_CHARS)]
@@ -127,3 +128,19 @@ class InspectionResult(InspectionOutcome):
 
     inspection_id: str = Field(min_length=1)
     report: InspectionReport
+
+
+class ImageUrls(BaseModel):
+    """Relative URLs of the three stored images for one inspection."""
+
+    photo: str
+    overlay: str
+    thumbnail: str
+
+
+class InspectionCreated(InspectionResult):
+    """One finished inspection, including where its images are stored."""
+
+    created_at: datetime
+    batch_id: str | None = None
+    images: ImageUrls

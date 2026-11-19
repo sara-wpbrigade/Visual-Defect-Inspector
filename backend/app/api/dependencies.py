@@ -13,6 +13,8 @@ from app.models.report_writer import ReportWriter
 from app.models.template_writer import TemplateReportWriter
 from app.services.inspection import InspectionService
 from app.services.report import ReportService, utc_now
+from app.services.repository import InspectionRepository, SqliteInspectionRepository
+from app.services.storage import ArtifactStore
 
 
 @lru_cache
@@ -55,3 +57,22 @@ def get_report_service(
         max_transcript_chars=settings.max_transcript_chars,
         clock=utc_now,
     )
+
+
+def build_repository(settings: Settings) -> SqliteInspectionRepository:
+    """Return the repository over the configured database file."""
+    return SqliteInspectionRepository(settings.database_path)
+
+
+def get_repository(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> InspectionRepository:
+    """Return the inspection repository for one request."""
+    return build_repository(settings)
+
+
+def get_artifact_store(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ArtifactStore:
+    """Return the artifact store over the configured upload folder."""
+    return ArtifactStore(settings.upload_dir)

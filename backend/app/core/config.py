@@ -21,6 +21,8 @@ DEFAULT_CHECKPOINT = (
     / "model.ckpt"
 )
 DEFAULT_UPLOAD_DIR = BACKEND_ROOT / "data" / "uploads"
+DEFAULT_DATABASE_PATH = BACKEND_ROOT / "data" / "inspections.db"
+DEFAULT_THUMBNAIL_SIZE = 160
 MEGABYTE = 1024 * 1024
 DEFAULT_MAX_IMAGE_BYTES = 10 * MEGABYTE
 DEFAULT_MAX_IMAGE_PIXELS = 4096 * 4096
@@ -54,6 +56,8 @@ class Settings(BaseSettings):
     checkpoint_path: Path = DEFAULT_CHECKPOINT
     detector_device: str = Field(default="auto", min_length=1)
     upload_dir: Path = DEFAULT_UPLOAD_DIR
+    database_path: Path = DEFAULT_DATABASE_PATH
+    thumbnail_size: int = Field(default=DEFAULT_THUMBNAIL_SIZE, gt=0)
     max_image_bytes: int = Field(default=DEFAULT_MAX_IMAGE_BYTES, gt=0)
     max_image_pixels: int = Field(default=DEFAULT_MAX_IMAGE_PIXELS, gt=0)
 

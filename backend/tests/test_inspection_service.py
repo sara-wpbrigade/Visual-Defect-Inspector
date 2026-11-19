@@ -19,7 +19,7 @@ def test_good_item_passes_and_is_accepted(
     service_factory: ServiceFactory, detection_factory: DetectionFactory
 ) -> None:
     """A low score with nothing flagged passes with no severity."""
-    outcome = service_factory(detection_factory(0.2)).inspect(IMAGE)
+    outcome = service_factory(detection_factory(0.2)).inspect(IMAGE).outcome
     assert (outcome.assessment.verdict, outcome.assessment.severity) == (
         Verdict.PASS,
         Severity.NONE,
@@ -32,7 +32,7 @@ def test_large_defect_is_high_severity_and_rejected(
     service_factory: ServiceFactory, detection_factory: DetectionFactory
 ) -> None:
     """A high score with a large flagged area is rejected."""
-    outcome = service_factory(detection_factory(0.9, 30)).inspect(IMAGE)
+    outcome = service_factory(detection_factory(0.9, 30)).inspect(IMAGE).outcome
     assert (outcome.assessment.severity, outcome.assessment.action) == (
         Severity.HIGH,
         Action.REJECT,
@@ -44,7 +44,7 @@ def test_borderline_score_needs_review(
     service_factory: ServiceFactory, detection_factory: DetectionFactory
 ) -> None:
     """A score near the cutoff is flagged for re-inspection."""
-    outcome = service_factory(detection_factory(0.55, 3)).inspect(IMAGE)
+    outcome = service_factory(detection_factory(0.55, 3)).inspect(IMAGE).outcome
     assert outcome.assessment.needs_review is True
     assert outcome.assessment.action is Action.RE_INSPECT
 
