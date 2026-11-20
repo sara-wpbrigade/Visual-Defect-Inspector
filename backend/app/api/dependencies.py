@@ -5,12 +5,15 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from app.core.categories import CategoryCatalog, load_categories
 from app.core.config import Settings, get_settings
 from app.core.persona import PersonaConfig, load_persona
-from app.models.detector import Detector
-from app.models.factory import create_detector, create_report_writer
+from app.models.embedding_classifier import EmbeddingCategoryClassifier
+from app.models.factory import create_report_writer
+from app.models.registry import DetectorRegistry
 from app.models.report_writer import ReportWriter
 from app.models.template_writer import TemplateReportWriter
+from app.services.category_verifier import CategoryVerifier
 from app.services.inspection import InspectionService
 from app.services.report import ReportService, utc_now
 from app.services.repository import InspectionRepository, SqliteInspectionRepository
@@ -18,9 +21,17 @@ from app.services.storage import ArtifactStore
 
 
 @lru_cache
-def get_detector() -> Detector:
-    """Return the configured detector, loading the model once per process."""
-    return create_detector(get_settings())
+def get_category_catalog() -> CategoryCatalog:
+    """Load the enabled and available categories once per process."""
+    settings = get_settings()
+    return load_categories(settings.categories_dir, settings.enabled_category_ids())
+
+
+@lru_cache
+def get_detector_registry() -> DetectorRegistry:
+    """Return the lazy per-category detector registry."""
+    settings = get_settings()
+    return DetectorRegistry(get_category_catalog(), settings.detector_device)
 
 
 @lru_cache
@@ -30,11 +41,19 @@ def get_persona() -> PersonaConfig:
 
 
 def get_inspection_service(
-    detector: Annotated[Detector, Depends(get_detector)],
+    registry: Annotated[DetectorRegistry, Depends(get_detector_registry)],
     persona: Annotated[PersonaConfig, Depends(get_persona)],
 ) -> InspectionService:
-    """Build the inspection service from its injected dependencies."""
-    return InspectionService(detector=detector, persona=persona)
+    """Build the inspection service from the registry and base persona."""
+    return InspectionService(registry=registry, base_persona=persona)
+
+
+@lru_cache
+def get_category_verifier() -> CategoryVerifier:
+    """Return the yes/no category gate backed by the embedding classifier."""
+    catalog = get_category_catalog()
+    classifier = EmbeddingCategoryClassifier(catalog, device=get_settings().detector_device)
+    return CategoryVerifier(catalog, classifier)
 
 
 @lru_cache

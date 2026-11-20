@@ -1,5 +1,6 @@
 """Tests for the SQLite inspection repository."""
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -47,8 +48,9 @@ def make_record(
     inspection_id: str = INSPECTION_ID,
     created_at: datetime = BASE_TIME,
     batch_id: str | None = None,
+    category: str = "unknown",
 ) -> InspectionRecord:
-    """Return a valid record with overridable id, time and batch."""
+    """Return a valid record with overridable id, time, batch and category."""
     assessment = Assessment(
         verdict=Verdict.DEFECT,
         confidence=0.9,
@@ -63,6 +65,7 @@ def make_record(
         created_at=created_at,
         persona="test_persona",
         batch_id=batch_id,
+        category=category,
         score=0.9,
         assessment=assessment,
         report=make_report(inspection_id),
@@ -190,3 +193,88 @@ def test_corrupt_row_raises_storage_error(
         connection.close()
     with pytest.raises(StorageError):
         repository.get(INSPECTION_ID)
+
+
+def test_summary_includes_the_category(repository: SqliteInspectionRepository) -> None:
+    """A history row carries the category that produced it."""
+    repository.add(make_record(INSPECTION_ID, BASE_TIME, category="widget"))
+    assert repository.list(limit=10, offset=0)[0].category == "widget"
+
+
+def test_list_filters_by_category(repository: SqliteInspectionRepository) -> None:
+    """A category filter returns only that category's rows."""
+    repository.add(make_record(INSPECTION_ID, BASE_TIME, category="widget"))
+    repository.add(make_record(OTHER_ID, BASE_TIME, category="gadget"))
+    summaries = repository.list(limit=10, offset=0, category="widget")
+    assert [summary.id for summary in summaries] == [INSPECTION_ID]
+    assert repository.count(category="widget") == 1
+    assert repository.count(category="gadget") == 1
+
+
+OLD_TABLE_SQL = """
+CREATE TABLE inspections (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    persona TEXT NOT NULL,
+    batch_id TEXT,
+    verdict TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    action TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    needs_review INTEGER NOT NULL,
+    score REAL NOT NULL,
+    area_ratio REAL NOT NULL,
+    region TEXT,
+    defect_type TEXT,
+    record_json TEXT NOT NULL
+)
+"""
+
+
+def test_version_one_database_is_migrated(tmp_path: Path) -> None:
+    """An older database gains the category column and old rows read as unknown."""
+    database_path = tmp_path / "inspections.db"
+    record = make_record()
+    old_json = json.loads(record.model_dump_json())
+    old_json.pop("category")
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(OLD_TABLE_SQL)
+        connection.execute(
+            "INSERT INTO inspections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                record.id,
+                record.created_at.isoformat(),
+                record.persona,
+                None,
+                record.assessment.verdict.value,
+                record.assessment.severity.value,
+                record.assessment.action.value,
+                record.assessment.confidence,
+                0,
+                record.score,
+                record.assessment.area_ratio,
+                None,
+                None,
+                json.dumps(old_json),
+            ),
+        )
+        connection.execute("PRAGMA user_version = 1")
+        connection.commit()
+    finally:
+        connection.close()
+
+    repository = SqliteInspectionRepository(database_path)
+    repository.initialize()
+    migrated = repository.get(INSPECTION_ID)
+    assert migrated is not None
+    assert migrated.category == "unknown"
+    assert repository.list(limit=10, offset=0)[0].category == "unknown"
+    connection = sqlite3.connect(database_path)
+    try:
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        columns = connection.execute("PRAGMA table_info(inspections)").fetchall()
+    finally:
+        connection.close()
+    assert version == 2
+    assert "category" in {row[1] for row in columns}

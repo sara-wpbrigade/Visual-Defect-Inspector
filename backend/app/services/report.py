@@ -66,12 +66,19 @@ class ReportService:
         outcome: InspectionOutcome,
         image: Image.Image,
         transcript: str | None = None,
+        *,
+        persona: PersonaConfig | None = None,
     ) -> InspectionReport:
-        """Return a validated report; never let a writer failure fail the inspection."""
+        """Return a validated report; never let a writer failure fail the inspection.
+
+        ``persona`` should be the effective persona for the inspected category;
+        when omitted the constructor persona is used.
+        """
+        effective = persona or self._persona
         started = perf_counter()
-        facts = build_report_facts(outcome, self._persona)
+        facts = build_report_facts(outcome, effective)
         clean_transcript = self._clean_transcript(transcript)
-        content, source = self._from_writer(facts, image, clean_transcript)
+        content, source = self._from_writer(facts, image, clean_transcript, effective)
         report = self._build_report(inspection_id, facts, content, source)
         logger.info(
             "Report generated source=%s duration_ms=%.1f",
@@ -81,25 +88,33 @@ class ReportService:
         return report
 
     def _from_writer(
-        self, facts: ReportFacts, image: Image.Image, transcript: str | None
+        self,
+        facts: ReportFacts,
+        image: Image.Image,
+        transcript: str | None,
+        persona: PersonaConfig,
     ) -> tuple[ReportContent, ReportSource]:
         """Try the configured writer, then fall back to the template."""
         attempts = 1 if self._writer.source is ReportSource.TEMPLATE else self._max_attempts
         for attempt in range(1, attempts + 1):
             try:
                 draft = self._writer.write(facts, image, transcript)
-                content = validate_draft(draft, facts, self._persona, transcript)
+                content = validate_draft(draft, facts, persona, transcript)
                 return content, self._writer.source
             except (ReportWriterError, ReportValidationError) as exc:
                 logger.warning("Report attempt %d failed with %s", attempt, type(exc).__name__)
-        return self._from_fallback(facts, image, transcript)
+        return self._from_fallback(facts, image, transcript, persona)
 
     def _from_fallback(
-        self, facts: ReportFacts, image: Image.Image, transcript: str | None
+        self,
+        facts: ReportFacts,
+        image: Image.Image,
+        transcript: str | None,
+        persona: PersonaConfig,
     ) -> tuple[ReportContent, ReportSource]:
         """Validate the deterministic template draft."""
         draft = self._fallback_writer.write(facts, image, transcript)
-        return validate_draft(draft, facts, self._persona, transcript), ReportSource.TEMPLATE
+        return validate_draft(draft, facts, persona, transcript), ReportSource.TEMPLATE
 
     def _clean_transcript(self, transcript: str | None) -> str | None:
         """Sanitize and cap the transcript, treating an empty result as absent."""

@@ -6,6 +6,11 @@ from PIL import Image, UnidentifiedImageError
 
 ALLOWED_FORMATS = frozenset({"JPEG", "PNG"})
 INVALID_IMAGE_MESSAGE = "The upload is not a valid image."
+SVG_MESSAGE = "SVG images are not supported; upload a JPEG or PNG photo."
+UTF8_BOM = b"\xef\xbb\xbf"
+SVG_PREFIXES = (b"<svg", b"<?xml")
+PDF_PREFIX = b"%PDF-"
+PDF_FORMAT = "PDF"
 
 
 class InvalidImageError(ValueError):
@@ -30,14 +35,27 @@ def load_image(data: bytes, *, max_bytes: int, max_pixels: int) -> Image.Image:
         raise InvalidImageError("The uploaded image is empty.")
     if len(data) > max_bytes:
         raise ImageTooLargeError(f"Images must be at most {max_bytes} bytes.")
+    if _looks_like_svg(data):
+        raise InvalidImageError(SVG_MESSAGE)
     image_format = _verify(data)
     if image_format not in ALLOWED_FORMATS:
         raise InvalidImageError(f"Unsupported image format {image_format}; use JPEG or PNG.")
     return _decode(data, max_pixels)
 
 
+def _looks_like_svg(data: bytes) -> bool:
+    """Return True when the bytes start an SVG or XML document."""
+    stripped = data.lstrip()
+    if stripped.startswith(UTF8_BOM):
+        stripped = stripped[len(UTF8_BOM) :].lstrip()
+    lowered = stripped.lower()
+    return any(lowered.startswith(prefix) for prefix in SVG_PREFIXES)
+
+
 def _verify(data: bytes) -> str:
     """Check that the bytes are an intact image and return its real format."""
+    if data.lstrip().startswith(PDF_PREFIX):
+        return PDF_FORMAT
     try:
         with Image.open(io.BytesIO(data)) as probe:
             probe.verify()

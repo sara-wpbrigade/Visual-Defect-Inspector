@@ -1,11 +1,15 @@
 """Test doubles and fixed data shared by the test suite."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from types import MappingProxyType
 
 import numpy as np
 from PIL import Image
 
-from app.models.detector import Detection
+from app.core.categories import CategoryCatalog, CategoryConfig
+from app.models.detector import Detection, Detector
+from app.models.registry import DetectorRegistry
 from app.schemas import ReportDraft, ReportSource
 from app.services.report_facts import ReportFacts
 
@@ -31,6 +35,39 @@ PERSONA_DATA = {
     },
 }
 
+CATEGORY_ID = "widget"
+OTHER_CATEGORY_ID = "gadget"
+CATEGORY_LOW_MAX = 0.01
+CATEGORY_MEDIUM_MAX = 0.05
+CATEGORY_MIN_SIMILARITY = 0.5
+
+
+def make_category_config(
+    category_id: str = CATEGORY_ID,
+    display_name: str = "Widget",
+    *,
+    defect_types: tuple[str, ...] = ("scratch",),
+    low_max: float = CATEGORY_LOW_MAX,
+    medium_max: float = CATEGORY_MEDIUM_MAX,
+    min_similarity: float = CATEGORY_MIN_SIMILARITY,
+) -> CategoryConfig:
+    """Return a category config with generic test paths."""
+    return CategoryConfig(
+        id=category_id,
+        display_name=display_name,
+        description=f"A test {display_name}.",
+        checkpoint_path=Path(f"{category_id}.ckpt"),
+        prototype_path=Path(f"{category_id}.npz"),
+        min_similarity=min_similarity,
+        defect_types=defect_types,
+        severity_bands=MappingProxyType({"low_max": low_max, "medium_max": medium_max}),
+    )
+
+
+def make_catalog(*configs: CategoryConfig) -> CategoryCatalog:
+    """Build a catalog from the supplied configs."""
+    return CategoryCatalog(configs or (make_category_config(),))
+
 
 class StubDetector:
     """Detector that returns an injected result (or error) without a model."""
@@ -38,13 +75,58 @@ class StubDetector:
     def __init__(self, result: Detection | Exception) -> None:
         """Remember what detect() should do."""
         self._result = result
+        self.calls = 0
 
     def detect(self, image: Image.Image) -> Detection:
         """Return the injected result, or raise the injected error."""
         del image
+        self.calls += 1
         if isinstance(self._result, Exception):
             raise self._result
         return self._result
+
+
+class StubDetectorRegistry(DetectorRegistry):
+    """Detector registry that returns stubs without loading any model."""
+
+    def __init__(
+        self,
+        detector: Detector | Mapping[str, Detector],
+        catalog: CategoryCatalog | None = None,
+    ) -> None:
+        """Store the stub detector(s) and an optional catalog."""
+        self._detector = detector
+        self._catalog = catalog
+
+    def get(self, category_id: str) -> Detector:
+        """Return the detector injected for this category."""
+        if isinstance(self._detector, Mapping):
+            return self._detector[category_id]
+        del category_id
+        return self._detector
+
+    def category(self, category_id: str) -> CategoryConfig:
+        """Return the config from the catalog, or a generic test config."""
+        if self._catalog is not None:
+            return self._catalog.get(category_id)
+        return make_category_config(category_id)
+
+
+class StubCategoryClassifier:
+    """Classifier that returns injected similarities and records the calls."""
+
+    def __init__(self, similarities: dict[str, float] | float) -> None:
+        """Store one similarity per category id, or one for every id."""
+        self._similarities = similarities
+        self.calls: list[str] = []
+
+    def similarity(self, image: Image.Image, category_id: str) -> float:
+        """Return the injected similarity and record which category was scored."""
+        del image
+        self.calls.append(category_id)
+        if isinstance(self._similarities, dict):
+            return self._similarities[category_id]
+        return self._similarities
 
 
 def make_detection(score: float, flagged: int = 0, total: int = 100) -> Detection:

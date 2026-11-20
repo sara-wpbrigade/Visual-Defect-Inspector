@@ -1,0 +1,10 @@
+{
+    "id": "screw",
+    "display_name": "Screw",
+    "description": "MVTec AD screw category",
+    "checkpoint_path": "results/Patchcore/MVTecAD/screw/v0/weights/lightning/model.ckpt",
+    "prototype_path": "results/prototypes/screw.npz",
+    "min_similarity": 0.78,
+    "defect_types": ["scratch on head","scratch on neck","thread damage","manipulated front"],
+    "severity_bands": {"low_max":0.02,"medium_max":0.12}
+  }

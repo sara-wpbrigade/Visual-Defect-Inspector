@@ -37,14 +37,10 @@ def test_create_detector_uses_the_checkpoint_and_device(
             captured["device"] = device
 
     monkeypatch.setattr(patchcore, "PatchCoreDetector", DetectorSpy)
-    settings = Settings(
-        checkpoint_path=tmp_path / "model.ckpt",
-        detector_device="cpu",
-        report_writer=ReportWriterKind.TEMPLATE,
-    )
-    detector = create_detector(settings)
+    ckpt = tmp_path / "model.ckpt"
+    detector = create_detector(ckpt, "cpu")
     assert isinstance(detector, DetectorSpy)
-    assert captured["checkpoint_path"] == tmp_path / "model.ckpt"
+    assert captured["checkpoint_path"] == ckpt
     assert captured["device"] == "cpu"
 
 

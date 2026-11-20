@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 
 from app.api.dependencies import get_artifact_store, get_repository
-from app.schemas import BATCH_ID_PATTERN
+from app.schemas import BATCH_ID_PATTERN, CATEGORY_ID_PATTERN
 from app.services.repository import (
     RECORD_NOT_FOUND_MESSAGE,
     InspectionDetail,
@@ -37,11 +37,12 @@ def list_inspections(
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
     offset: Annotated[int, Query(ge=0)] = DEFAULT_OFFSET,
     batch_id: Annotated[str | None, Query(pattern=BATCH_ID_PATTERN)] = None,
+    category: Annotated[str | None, Query(pattern=CATEGORY_ID_PATTERN)] = None,
 ) -> InspectionHistory:
     """Return one page of the inspection history and the total count."""
     return InspectionHistory(
-        items=repository.list(limit=limit, offset=offset, batch_id=batch_id),
-        total=repository.count(batch_id=batch_id),
+        items=repository.list(limit=limit, offset=offset, batch_id=batch_id, category=category),
+        total=repository.count(batch_id=batch_id, category=category),
     )
 
 

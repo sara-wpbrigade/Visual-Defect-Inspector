@@ -1,7 +1,7 @@
 """API tests for the inspection endpoints with a stubbed detector."""
 
 import io
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
 import numpy as np
@@ -11,15 +11,31 @@ from httpx2 import Response
 from PIL import Image
 from pydantic import SecretStr
 
-from app.api.dependencies import get_detector, get_persona, get_report_service
+from app.api.dependencies import (
+    get_category_catalog,
+    get_category_verifier,
+    get_detector_registry,
+    get_persona,
+    get_report_service,
+)
+from app.core.categories import CategoryConfig
 from app.core.config import ReportWriterKind, Settings, get_settings
 from app.core.persona import PersonaConfig
 from app.main import app
-from app.models.detector import Detection
+from app.models.detector import Detection, Detector
 from app.models.template_writer import TemplateReportWriter
+from app.services.category_verifier import CategoryVerifier
 from app.services.report import ReportService
 from app.services.repository import SqliteInspectionRepository
-from tests.fakes import StubDetector
+from tests.fakes import (
+    CATEGORY_ID,
+    OTHER_CATEGORY_ID,
+    StubCategoryClassifier,
+    StubDetector,
+    StubDetectorRegistry,
+    make_catalog,
+    make_category_config,
+)
 
 PNG_CONTENT_TYPE = "image/png"
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -30,6 +46,7 @@ TEMPLATE_MAX_ATTEMPTS = 1
 DEFAULT_MAX_TRANSCRIPT_CHARS = 1000
 UNKNOWN_ID = "0" * 32
 MALFORMED_ID = "../escape"
+UNKNOWN_CATEGORY = "missing_category"
 
 DetectionFactory = Callable[..., Detection]
 
@@ -42,18 +59,23 @@ def make_png(size: tuple[int, int] = (10, 10)) -> bytes:
 
 
 def upload(
-    client: TestClient, data: bytes, name: str = "photo.png", batch_id: str | None = None
+    client: TestClient,
+    data: bytes,
+    name: str = "photo.png",
+    batch_id: str | None = None,
+    category: str | None = CATEGORY_ID,
 ) -> Response:
-    """Post image bytes to the inspection endpoint, optionally with a batch id."""
+    """Post image bytes with a category and an optional batch id."""
     files = {"image": (name, data, PNG_CONTENT_TYPE)}
-    if batch_id is None:
-        return client.post("/inspections", files=files)
-    return client.post("/inspections", files=files, data={"batch_id": batch_id})
+    form = {"batch_id": batch_id} if batch_id is not None else {}
+    if category is not None:
+        form["category"] = category
+    return client.post("/inspections", files=files, data=form)
 
 
 @pytest.fixture
 def api_factory(tmp_path: Path, persona: PersonaConfig) -> Iterator[Callable[..., TestClient]]:
-    """Build clients with the model, persona and settings under test control."""
+    """Build clients with the model, category gate and settings under test control."""
     base = Settings(
         gemini_api_key=SecretStr("test-key"),
         gemini_model="test-model",
@@ -61,12 +83,30 @@ def api_factory(tmp_path: Path, persona: PersonaConfig) -> Iterator[Callable[...
         database_path=tmp_path / "inspections.db",
     )
 
-    def build(result: Detection | Exception, **overrides: object) -> TestClient:
+    def build(
+        result: Detection | Exception,
+        *,
+        categories: tuple[CategoryConfig, ...] | None = None,
+        detectors: Mapping[str, Detector] | None = None,
+        similarity: float = 1.0,
+        similarities: dict[str, float] | None = None,
+        **overrides: object,
+    ) -> TestClient:
         settings = base.model_copy(update=dict(overrides))
         SqliteInspectionRepository(settings.database_path).initialize()
+        catalog = make_catalog(*(categories or (make_category_config(),)))
+        registry = StubDetectorRegistry(
+            detectors if detectors is not None else StubDetector(result),
+            catalog,
+        )
+        classifier = StubCategoryClassifier(similarities or similarity)
         app.dependency_overrides[get_settings] = lambda: settings
+        app.dependency_overrides[get_category_catalog] = lambda: catalog
         app.dependency_overrides[get_persona] = lambda: persona
-        app.dependency_overrides[get_detector] = lambda: StubDetector(result)
+        app.dependency_overrides[get_detector_registry] = lambda: registry
+        app.dependency_overrides[get_category_verifier] = lambda: CategoryVerifier(
+            catalog, classifier
+        )
         app.dependency_overrides[get_report_service] = lambda: ReportService(
             writer=TemplateReportWriter(),
             fallback_writer=TemplateReportWriter(),
@@ -372,3 +412,134 @@ def test_database_file_is_created(
     """The SQLite database is written to the configured path."""
     upload(api_factory(detection_factory(0.2)), make_png())
     assert (tmp_path / "inspections.db").is_file()
+
+
+def test_missing_category_is_rejected(
+    api_factory: Callable[..., TestClient], detection_factory: DetectionFactory
+) -> None:
+    """The operator must choose a category; omitting it is a 422."""
+    client = api_factory(detection_factory(0.2))
+    response = client.post("/inspections", files={"image": ("photo.png", make_png(), "image/png")})
+    assert response.status_code == 422
+
+
+def test_category_mismatch_is_rejected_without_writing(
+    api_factory: Callable[..., TestClient],
+    detection_factory: DetectionFactory,
+    tmp_path: Path,
+) -> None:
+    """A photo below the cutoff is a 422 and leaves no files or database row."""
+    client = api_factory(detection_factory(0.2), similarity=0.1)
+    response = upload(client, make_png())
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "This photo does not look like a Widget.",
+        "code": "category_mismatch",
+        "supported_categories": [{"id": CATEGORY_ID, "display_name": "Widget"}],
+    }
+    assert not list((tmp_path / "uploads").glob("*"))
+    repository = SqliteInspectionRepository(tmp_path / "inspections.db")
+    assert repository.count() == 0
+
+
+def test_unknown_category_is_rejected_without_writing(
+    api_factory: Callable[..., TestClient],
+    detection_factory: DetectionFactory,
+    tmp_path: Path,
+) -> None:
+    """An id outside the catalog is an unknown-category 422."""
+    client = api_factory(detection_factory(0.2))
+    response = upload(client, make_png(), category=UNKNOWN_CATEGORY)
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "unknown_category"
+    assert body["supported_categories"] == [{"id": CATEGORY_ID, "display_name": "Widget"}]
+    assert not list((tmp_path / "uploads").glob("*"))
+    assert SqliteInspectionRepository(tmp_path / "inspections.db").count() == 0
+
+
+def test_categories_endpoint_lists_available_categories(
+    api_factory: Callable[..., TestClient], detection_factory: DetectionFactory
+) -> None:
+    """GET /categories returns the available ids and their defect types."""
+    client = api_factory(
+        detection_factory(0.2),
+        categories=(make_category_config(CATEGORY_ID, "Widget"),),
+    )
+    assert client.get("/categories").json() == [
+        {
+            "id": CATEGORY_ID,
+            "display_name": "Widget",
+            "description": "A test Widget.",
+            "defect_types": ["scratch"],
+        }
+    ]
+
+
+def test_category_is_stored_and_returned_without_similarity(
+    api_factory: Callable[..., TestClient],
+    detection_factory: DetectionFactory,
+    tmp_path: Path,
+) -> None:
+    """Success stores and returns the category, and no similarity field anywhere."""
+    client = api_factory(detection_factory(0.9, 30))
+    response = upload(client, make_png())
+    assert response.status_code == 201
+    body = response.json()
+    assert body["category"] == CATEGORY_ID
+    assert "category_similarity" not in response.text
+    inspection_id = body["inspection_id"]
+    detail = client.get(f"/inspections/{inspection_id}")
+    history = client.get("/inspections")
+    assert detail.json()["category"] == CATEGORY_ID
+    assert history.json()["items"][0]["category"] == CATEGORY_ID
+    assert "category_similarity" not in detail.text
+    assert "category_similarity" not in history.text
+    record = SqliteInspectionRepository(tmp_path / "inspections.db").get(inspection_id)
+    assert record is not None
+    assert record.category == CATEGORY_ID
+
+
+def test_two_categories_use_different_detectors_and_bands(
+    api_factory: Callable[..., TestClient],
+    detection_factory: DetectionFactory,
+) -> None:
+    """The same score and area get each category's detector and severity bands."""
+    first = make_category_config(CATEGORY_ID, "Widget", low_max=0.01, medium_max=0.05)
+    second = make_category_config(OTHER_CATEGORY_ID, "Gadget", low_max=0.2, medium_max=0.4)
+    first_detector = StubDetector(detection_factory(0.9, 10))
+    second_detector = StubDetector(detection_factory(0.9, 10))
+    client = api_factory(
+        detection_factory(0.9, 10),
+        categories=(first, second),
+        detectors={CATEGORY_ID: first_detector, OTHER_CATEGORY_ID: second_detector},
+    )
+    first_body = upload(client, make_png(), category=CATEGORY_ID).json()
+    second_body = upload(client, make_png(), category=OTHER_CATEGORY_ID).json()
+    assert first_body["assessment"]["severity"] == "high"
+    assert second_body["assessment"]["severity"] == "low"
+    assert first_detector.calls == 1
+    assert second_detector.calls == 1
+
+
+def test_history_filters_by_category(
+    api_factory: Callable[..., TestClient],
+    detection_factory: DetectionFactory,
+) -> None:
+    """The history category filter returns only that category's rows."""
+    first = make_category_config(CATEGORY_ID, "Widget")
+    second = make_category_config(OTHER_CATEGORY_ID, "Gadget")
+    client = api_factory(
+        detection_factory(0.2),
+        categories=(first, second),
+        detectors={
+            CATEGORY_ID: StubDetector(detection_factory(0.2)),
+            OTHER_CATEGORY_ID: StubDetector(detection_factory(0.2)),
+        },
+    )
+    upload(client, make_png(), category=CATEGORY_ID)
+    upload(client, make_png(), category=OTHER_CATEGORY_ID)
+    filtered = client.get("/inspections", params={"category": CATEGORY_ID}).json()
+    assert filtered["total"] == 1
+    assert {item["category"] for item in filtered["items"]} == {CATEGORY_ID}
+    assert client.get("/inspections").json()["total"] == 2

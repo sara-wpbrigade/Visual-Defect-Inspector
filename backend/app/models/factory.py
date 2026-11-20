@@ -1,5 +1,7 @@
 """Pick the detector and report-writer implementations named by configuration."""
 
+from pathlib import Path
+
 from app.core.config import MILLISECONDS_PER_SECOND, ReportWriterKind, Settings
 from app.models.detector import Detector
 from app.models.report_writer import ReportWriter
@@ -8,15 +10,15 @@ from app.models.template_writer import TemplateReportWriter
 GEMINI_SETTINGS_ERROR = "Gemini report writing requires GEMINI_API_KEY and GEMINI_MODEL."
 
 
-def create_detector(settings: Settings) -> Detector:
-    """Return the configured detector.
+def create_detector(checkpoint_path: Path, device: str) -> Detector:
+    """Return a PatchCore detector for the given checkpoint.
 
     The import is deferred because loading Anomalib and Torch costs seconds and
     hundreds of megabytes, which the health check and the test suite never need.
     """
     from app.models.patchcore import PatchCoreDetector
 
-    return PatchCoreDetector(settings.checkpoint_path, settings.detector_device)
+    return PatchCoreDetector(checkpoint_path, device)
 
 
 def create_report_writer(settings: Settings) -> ReportWriter:

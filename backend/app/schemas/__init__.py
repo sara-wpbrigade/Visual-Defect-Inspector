@@ -4,6 +4,7 @@ from .assessment import Assessment, DefectLocation, InspectionOutcome
 from .enums import DEFECT_SEVERITIES, Action, ReportSource, Severity, Verdict
 from .inspection import (
     BATCH_ID_PATTERN,
+    CATEGORY_ID_PATTERN,
     ImageUrls,
     InspectionCreated,
     InspectionResult,
@@ -27,6 +28,7 @@ __all__ = [
     "Action",
     "Assessment",
     "BATCH_ID_PATTERN",
+    "CATEGORY_ID_PATTERN",
     "DEFECT_SEVERITIES",
     "DefectLocation",
     "Finding",

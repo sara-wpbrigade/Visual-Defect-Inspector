@@ -8,12 +8,14 @@ from .assessment import InspectionOutcome
 from .report import InspectionReport
 
 BATCH_ID_PATTERN = r"^[A-Za-z0-9_-]{1,40}$"
+CATEGORY_ID_PATTERN = r"^[a-z][a-z0-9_]{0,40}$"
 
 
 class InspectionResult(InspectionOutcome):
     """One finished inspection as returned by the API."""
 
     inspection_id: str = Field(min_length=1)
+    category: str = Field(min_length=1)
     report: InspectionReport
 
 

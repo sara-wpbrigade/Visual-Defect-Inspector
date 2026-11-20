@@ -8,20 +8,22 @@ from PIL import Image
 
 from app.api.dependencies import (
     get_artifact_store,
+    get_category_verifier,
     get_inspection_service,
-    get_persona,
     get_report_service,
     get_repository,
 )
 from app.core.config import Settings, get_settings
 from app.core.images import load_image
-from app.core.persona import PersonaConfig
 from app.schemas import (
     BATCH_ID_PATTERN,
+    CATEGORY_ID_PATTERN,
     InspectionCreated,
     InspectionOutcome,
     InspectionReport,
 )
+from app.schemas.errors import CategoryErrorBody
+from app.services.category_verifier import CategoryVerifier
 from app.services.inspection import InspectionAnalysis, InspectionService
 from app.services.overlay import make_thumbnail, render_overlay
 from app.services.report import ReportService, utc_now
@@ -37,35 +39,56 @@ from app.services.storage import (
 router = APIRouter(prefix="/inspections", tags=["inspections"])
 
 
-@router.post("", response_model=InspectionCreated, status_code=201)
+@router.post(
+    "",
+    response_model=InspectionCreated,
+    responses={422: {"model": CategoryErrorBody}},
+    status_code=201,
+)
 def create_inspection(
     image: Annotated[UploadFile, File(description="JPEG or PNG photo of the item")],
     service: Annotated[InspectionService, Depends(get_inspection_service)],
     report_service: Annotated[ReportService, Depends(get_report_service)],
-    persona: Annotated[PersonaConfig, Depends(get_persona)],
+    verifier: Annotated[CategoryVerifier, Depends(get_category_verifier)],
     store: Annotated[ArtifactStore, Depends(get_artifact_store)],
     repository: Annotated[InspectionRepository, Depends(get_repository)],
     settings: Annotated[Settings, Depends(get_settings)],
+    category: Annotated[
+        str,
+        Form(pattern=CATEGORY_ID_PATTERN, description="Category chosen by the operator"),
+    ],
     batch_id: Annotated[str | None, Form(pattern=BATCH_ID_PATTERN)] = None,
 ) -> InspectionCreated:
-    """Validate, analyse and persist one photo, then return its facts and report."""
+    """Validate the photo and category, analyse it, then persist the inspection."""
     # A sync endpoint runs in FastAPI's threadpool, so model inference cannot
     # block the event loop. One byte over the limit proves the file is too big.
     photo = _load_upload(image, settings)
+    verifier.verify(photo, category)
     inspection_id = new_inspection_id()
+    analysis = service.inspect(photo, category)
+    report = report_service.generate(
+        inspection_id, analysis.outcome, photo, persona=analysis.persona
+    )
     store.save(photo, inspection_id, PHOTO_KIND)
-    analysis = service.inspect(photo)
-    report = report_service.generate(inspection_id, analysis.outcome, photo)
     _save_artifacts(store, photo, analysis, inspection_id, settings.thumbnail_size)
     created_at = utc_now()
     repository.add(
-        _build_record(inspection_id, created_at, persona.name, batch_id, analysis.outcome, report)
+        _build_record(
+            inspection_id,
+            created_at,
+            analysis.persona.name,
+            category,
+            batch_id,
+            analysis.outcome,
+            report,
+        )
     )
-    return _created_result(inspection_id, analysis.outcome, report, created_at, batch_id)
+    return _created_result(inspection_id, category, analysis.outcome, report, created_at, batch_id)
 
 
 def _created_result(
     inspection_id: str,
+    category: str,
     outcome: InspectionOutcome,
     report: InspectionReport,
     created_at: datetime,
@@ -74,6 +97,7 @@ def _created_result(
     """Build the response body for a stored inspection."""
     return InspectionCreated(
         inspection_id=inspection_id,
+        category=category,
         score=outcome.score,
         assessment=outcome.assessment,
         report=report,
@@ -110,6 +134,7 @@ def _build_record(
     inspection_id: str,
     created_at: datetime,
     persona: str,
+    category: str,
     batch_id: str | None,
     outcome: InspectionOutcome,
     report: InspectionReport,
@@ -119,6 +144,7 @@ def _build_record(
         id=inspection_id,
         created_at=created_at,
         persona=persona,
+        category=category,
         batch_id=batch_id,
         score=outcome.score,
         assessment=outcome.assessment,

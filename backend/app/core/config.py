@@ -9,17 +9,7 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CHECKPOINT = (
-    BACKEND_ROOT
-    / "results"
-    / "Patchcore"
-    / "MVTecAD"
-    / "bottle"
-    / "v1"
-    / "weights"
-    / "lightning"
-    / "model.ckpt"
-)
+DEFAULT_CATEGORIES_DIR = BACKEND_ROOT / "config" / "categories"
 DEFAULT_UPLOAD_DIR = BACKEND_ROOT / "data" / "uploads"
 DEFAULT_DATABASE_PATH = BACKEND_ROOT / "data" / "inspections.db"
 DEFAULT_THUMBNAIL_SIZE = 160
@@ -53,7 +43,13 @@ class Settings(BaseSettings):
     gemini_model: Annotated[str, Field(min_length=1)] | None = None
 
     persona_name: str = Field(default="factory_qc_operator", pattern=r"[a-z][a-z_]{0,40}")
-    checkpoint_path: Path = DEFAULT_CHECKPOINT
+    # Directory that contains per-category JSON files (relative to the repository root)
+    categories_dir: Path = DEFAULT_CATEGORIES_DIR
+    # Optional comma-separated list of category ids to enable; empty -> enable all found.
+    enabled_categories: str = Field(
+        default="",
+        description="Comma-separated list of category ids to enable; empty means all.",
+    )
     detector_device: str = Field(default="auto", min_length=1)
     upload_dir: Path = DEFAULT_UPLOAD_DIR
     database_path: Path = DEFAULT_DATABASE_PATH
@@ -68,6 +64,10 @@ class Settings(BaseSettings):
     report_include_image: bool = DEFAULT_REPORT_INCLUDE_IMAGE
     report_max_attempts: int = Field(default=DEFAULT_REPORT_MAX_ATTEMPTS, ge=1)
     max_transcript_chars: int = Field(default=DEFAULT_MAX_TRANSCRIPT_CHARS, gt=0)
+
+    def enabled_category_ids(self) -> list[str]:
+        """Return the category ids named in the environment, or an empty list for all."""
+        return [part.strip() for part in self.enabled_categories.split(",") if part.strip()]
 
     @model_validator(mode="after")
     def check_gemini_credentials(self) -> Self:

@@ -69,3 +69,39 @@ def test_too_many_pixels_are_rejected() -> None:
     """A small file can still decode to an enormous image."""
     with pytest.raises(ImageTooLargeError):
         load(make_image((200, 200)))
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+        b"  \n\t<svg></svg>",
+        b"\xef\xbb\xbf<?xml version='1.0'?><svg></svg>",
+        b"  \xef\xbb\xbf  <svg></svg>",
+    ],
+)
+def test_svg_is_rejected_with_a_specific_message(data: bytes) -> None:
+    """SVG bytes are refused before decoding, with an actionable message."""
+    with pytest.raises(
+        InvalidImageError, match="SVG images are not supported; upload a JPEG or PNG photo."
+    ):
+        load(data)
+
+
+@pytest.mark.parametrize("image_format", ["GIF", "WEBP", "BMP", "TIFF"])
+def test_other_real_formats_name_the_format(image_format: str) -> None:
+    """Real but unsupported formats keep the format-specific message."""
+    with pytest.raises(InvalidImageError, match=f"Unsupported image format {image_format}"):
+        load(make_image(image_format=image_format))
+
+
+def test_pdf_is_rejected_as_an_unsupported_format() -> None:
+    """PDF bytes are identified and refused as a document, not a photo."""
+    with pytest.raises(InvalidImageError, match="Unsupported image format PDF"):
+        load(b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n")
+
+
+def test_text_file_named_png_is_rejected() -> None:
+    """A .png filename cannot make ordinary text an image."""
+    with pytest.raises(InvalidImageError, match="valid image"):
+        load(b"this is not an image")

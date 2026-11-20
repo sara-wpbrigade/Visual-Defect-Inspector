@@ -27,7 +27,7 @@ from app.services.storage import (
 logger = logging.getLogger(__name__)
 
 DATABASE_TIMEOUT_SECONDS = 5.0
-SCHEMA_VERSION = 1
+# Schema version is now managed by migration module
 TIMESTAMP_PRECISION = "microseconds"
 RECORD_NOT_FOUND_MESSAGE = "The inspection was not found."
 CORRUPT_RECORD_MESSAGE = "A stored inspection record is corrupt."
@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS inspections (
     created_at TEXT NOT NULL,
     persona TEXT NOT NULL,
     batch_id TEXT,
+    category TEXT NOT NULL DEFAULT 'unknown',
     verdict TEXT NOT NULL,
     severity TEXT NOT NULL,
     action TEXT NOT NULL,
@@ -57,27 +58,22 @@ CREATE_CREATED_AT_INDEX_SQL = (
 CREATE_BATCH_ID_INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS inspections_batch_id ON inspections (batch_id)"
 )
+CREATE_CATEGORY_INDEX_SQL = (
+    "CREATE INDEX IF NOT EXISTS inspections_category ON inspections (category)"
+)
 # SQLite does not accept a bound parameter in a PRAGMA, and the schema version is
 # a fixed integer constant, so it is baked into this statement rather than user data.
-SET_USER_VERSION_SQL = f"PRAGMA user_version = {SCHEMA_VERSION}"
+
 
 INSERT_SQL = """
 INSERT INTO inspections (
-    id, created_at, persona, batch_id, verdict, severity, action,
+    id, created_at, persona, batch_id, category, verdict, severity, action,
     confidence, needs_review, score, area_ratio, region, defect_type, record_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 SELECT_RECORD_SQL = "SELECT record_json FROM inspections WHERE id = ?"
-SELECT_SUMMARIES_SQL = (
-    "SELECT id, created_at, batch_id, record_json FROM inspections "
-    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-)
-SELECT_BATCH_SUMMARIES_SQL = (
-    "SELECT id, created_at, batch_id, record_json FROM inspections "
-    "WHERE batch_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?"
-)
+SELECT_SUMMARIES_SQL = "SELECT id, created_at, batch_id, record_json FROM inspections"
 COUNT_SQL = "SELECT COUNT(*) FROM inspections"
-COUNT_BATCH_SQL = "SELECT COUNT(*) FROM inspections WHERE batch_id = ?"
 
 
 class InspectionNotFoundError(RuntimeError):
@@ -91,6 +87,7 @@ class InspectionRecord(BaseModel):
     created_at: datetime
     persona: str
     batch_id: str | None = None
+    category: str = "unknown"
     score: float = Field(ge=0)
     assessment: Assessment
     report: InspectionReport
@@ -101,6 +98,7 @@ class InspectionSummary(BaseModel):
 
     id: str
     created_at: datetime
+    category: str
     batch_id: str | None
     verdict: Verdict
     severity: Severity
@@ -134,12 +132,18 @@ class InspectionRepository(Protocol):
         """Return one record, or None when the id is unknown."""
         ...
 
-    def list(self, limit: int, offset: int, batch_id: str | None = None) -> list[InspectionSummary]:
-        """Return the newest summaries first, optionally for one batch."""
+    def list(
+        self,
+        limit: int,
+        offset: int,
+        batch_id: str | None = None,
+        category: str | None = None,
+    ) -> list[InspectionSummary]:
+        """Return the newest summaries first, optionally filtered."""
         ...
 
-    def count(self, batch_id: str | None = None) -> int:
-        """Return how many records exist, optionally for one batch."""
+    def count(self, batch_id: str | None = None, category: str | None = None) -> int:
+        """Return how many records exist, optionally filtered."""
         ...
 
 
@@ -160,12 +164,14 @@ class SqliteInspectionRepository:
         self._database_path = database_path
 
     def initialize(self) -> None:
-        """Create the table and indexes once at application startup."""
+        """Create the table and indexes once at application startup.
+
+        This now uses the migration module to ensure the schema is up‑to‑date.
+        """
+        from app.services.migration import initialize_schema
+
         with self._connect() as connection:
-            connection.execute(CREATE_TABLE_SQL)
-            connection.execute(CREATE_CREATED_AT_INDEX_SQL)
-            connection.execute(CREATE_BATCH_ID_INDEX_SQL)
-            connection.execute(SET_USER_VERSION_SQL)
+            initialize_schema(connection)
 
     def add(self, record: InspectionRecord) -> None:
         """Insert one validated record, keeping its JSON form for later reads."""
@@ -180,6 +186,7 @@ class SqliteInspectionRepository:
                     _format_timestamp(record.created_at),
                     record.persona,
                     record.batch_id,
+                    record.category,
                     assessment.verdict.value,
                     assessment.severity.value,
                     assessment.action.value,
@@ -202,18 +209,25 @@ class SqliteInspectionRepository:
             return None
         return _parse_record(row[0])
 
-    def list(self, limit: int, offset: int, batch_id: str | None = None) -> list[InspectionSummary]:
-        """Return the newest summaries first, optionally for one batch."""
-        query, params = _summary_query(batch_id, limit, offset)
+    def list(
+        self,
+        limit: int,
+        offset: int,
+        batch_id: str | None = None,
+        category: str | None = None,
+    ) -> list[InspectionSummary]:
+        """Return the newest summaries first, optionally filtered."""
+        where, filters = _filters(batch_id, category)
+        query = f"{SELECT_SUMMARIES_SQL}{where} ORDER BY created_at DESC LIMIT ? OFFSET ?"
         with self._connect() as connection:
-            rows = connection.execute(query, params).fetchall()
+            rows = connection.execute(query, (*filters, limit, offset)).fetchall()
         return [_summary(_parse_record(row[3])) for row in rows]
 
-    def count(self, batch_id: str | None = None) -> int:
-        """Return how many records exist, optionally for one batch."""
-        query, params = (COUNT_BATCH_SQL, (batch_id,)) if batch_id else (COUNT_SQL, ())
+    def count(self, batch_id: str | None = None, category: str | None = None) -> int:
+        """Return how many records exist, optionally filtered."""
+        where, filters = _filters(batch_id, category)
         with self._connect() as connection:
-            row = connection.execute(query, params).fetchone()
+            row = connection.execute(f"{COUNT_SQL}{where}", filters).fetchone()
         return int(row[0])
 
     @contextmanager
@@ -232,13 +246,19 @@ class SqliteInspectionRepository:
             connection.close()
 
 
-def _summary_query(
-    batch_id: str | None, limit: int, offset: int
-) -> tuple[str, tuple[str, int, int] | tuple[int, int]]:
-    """Return the listing query and its bound parameters."""
-    if batch_id is None:
-        return SELECT_SUMMARIES_SQL, (limit, offset)
-    return SELECT_BATCH_SUMMARIES_SQL, (batch_id, limit, offset)
+def _filters(batch_id: str | None, category: str | None) -> tuple[str, list[str]]:
+    """Return the optional WHERE clause and its bound string parameters."""
+    clauses: list[str] = []
+    params: list[str] = []
+    if batch_id is not None:
+        clauses.append("batch_id = ?")
+        params.append(batch_id)
+    if category is not None:
+        clauses.append("category = ?")
+        params.append(category)
+    if not clauses:
+        return "", params
+    return " WHERE " + " AND ".join(clauses), params
 
 
 def _summary(record: InspectionRecord) -> InspectionSummary:
@@ -247,6 +267,7 @@ def _summary(record: InspectionRecord) -> InspectionSummary:
     return InspectionSummary(
         id=record.id,
         created_at=record.created_at,
+        category=record.category,
         batch_id=record.batch_id,
         verdict=assessment.verdict,
         severity=assessment.severity,

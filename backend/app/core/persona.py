@@ -1,11 +1,14 @@
 """Persona configuration: what is inspected and how results map to actions."""
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
 from typing import Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.categories import CategoryConfig
 from app.schemas import DEFECT_SEVERITIES, Action, Severity
 
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "config" / "personas"
@@ -67,6 +70,19 @@ class PersonaConfig(BaseModel):
         if any(not sentence.strip() for sentence in value.values()):
             raise ValueError("action_text sentences must not be empty")
         return value
+
+    def for_category(self, category: CategoryConfig) -> PersonaConfig:
+        """Return a copy with the category's defect types and severity bands.
+
+        Actions, cutoffs and report wording stay exactly as the persona defines
+        them; only the two category-specific fields are overlaid.
+        """
+        return self.model_copy(
+            update={
+                "defect_types": list(category.defect_types),
+                "severity_bands": SeverityBands(**category.severity_bands),
+            }
+        )
 
 
 def load_persona(name: str, config_dir: Path = CONFIG_DIR) -> PersonaConfig:
