@@ -1,0 +1,223 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1020" viewBox="0 0 1500 1020" role="img" aria-labelledby="title desc">
+  <title id="title">Visual Defect Inspector — whole system architecture</title>
+  <desc id="desc">Browser, FastAPI backend, AI model layer, SQLite and artifact storage, with the request and report paths.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#576460" />
+    </marker>
+    <style>
+      .bg { fill: #f4f7f8; }
+      .column { fill: #ffffff; stroke: #d4dddf; stroke-width: 1.5; }
+      .box { fill: #f8fafb; stroke: #bfcacd; stroke-width: 1.3; }
+      .box-green { fill: #e2efe9; stroke: #0f3d2e; stroke-width: 1.4; }
+      .box-blue { fill: #e2edf6; stroke: #1f5b8a; stroke-width: 1.4; }
+      .box-amber { fill: #fff4d6; stroke: #8a5a00; stroke-width: 1.4; }
+      .box-red { fill: #fbe8e5; stroke: #b3281a; stroke-width: 1.4; }
+      .header-blue { fill: #1f5b8a; }
+      .header-green { fill: #0f3d2e; }
+      .header-amber { fill: #8a5a00; }
+      .title { font-family: Inter, Arial, sans-serif; font-size: 30px; font-weight: 800; fill: #131f1b; }
+      .subtitle { font-family: Inter, Arial, sans-serif; font-size: 15px; fill: #576460; }
+      .column-title { font-family: Inter, Arial, sans-serif; font-size: 18px; font-weight: 700; fill: #ffffff; }
+      .box-title { font-family: Inter, Arial, sans-serif; font-size: 15px; font-weight: 700; fill: #131f1b; }
+      .box-text { font-family: Inter, Arial, sans-serif; font-size: 12.5px; fill: #576460; }
+      .small { font-family: Inter, Arial, sans-serif; font-size: 11.5px; fill: #576460; }
+      .note { font-family: Inter, Arial, sans-serif; font-size: 13px; fill: #26332e; }
+      .arrow { stroke: #576460; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
+      .arrow-dash { stroke: #85928d; stroke-width: 1.6; fill: none; stroke-dasharray: 6 5; marker-end: url(#arrow); }
+      .line { stroke: #576460; stroke-width: 1.6; fill: none; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1500" height="1020" rx="18" />
+
+  <text class="title" x="40" y="52">Visual Defect Inspector — whole system</text>
+  <text class="subtitle" x="40" y="78">Photo → category gate → PatchCore → rule-based facts → AI/offline report → SQLite + PDF + CSV</text>
+
+  <!-- Browser column -->
+  <rect class="column" x="40" y="100" width="390" height="820" rx="16" />
+  <rect class="header-blue" x="40" y="100" width="390" height="48" rx="16" />
+  <rect class="header-blue" x="40" y="132" width="390" height="16" />
+  <text class="column-title" x="62" y="131">Browser · React 19 + Vite 8</text>
+
+  <rect class="box" x="64" y="174" width="342" height="62" rx="10" />
+  <text class="box-title" x="80" y="198">App shell</text>
+  <text class="box-text" x="80" y="218">Tabs · theme · shortcuts · status announcement</text>
+
+  <rect class="box" x="64" y="252" width="342" height="72" rx="10" />
+  <text class="box-title" x="80" y="276">UploadPanel</text>
+  <text class="box-text" x="80" y="296">Photo · camera · category · batch ID · voice note</text>
+
+  <rect class="box" x="64" y="340" width="342" height="72" rx="10" />
+  <text class="box-title" x="80" y="364">ResultCard / ResultModal</text>
+  <text class="box-text" x="80" y="384">Decision first · evidence · report · PDF · transcript</text>
+
+  <rect class="box" x="64" y="428" width="342" height="72" rx="10" />
+  <text class="box-title" x="80" y="452">BatchesHistoryView</text>
+  <text class="box-text" x="80" y="472">KPIs · batch detail · history · CSV · PDF</text>
+
+  <rect class="box-blue" x="64" y="530" width="342" height="78" rx="10" />
+  <text class="box-title" x="80" y="555">services/api.js</text>
+  <text class="box-text" x="80" y="575">The only HTTP client: multipart upload, shape checks,</text>
+  <text class="box-text" x="80" y="592">snake_case → camelCase, operator error messages</text>
+
+  <rect class="box" x="64" y="632" width="342" height="92" rx="10" />
+  <text class="box-title" x="80" y="656">Supporting UI</text>
+  <text class="box-text" x="80" y="676">useInspection · useBackendHealth · RecentInspections</text>
+  <text class="box-text" x="80" y="694">BatchContextStrip · Toast · ErrorBoundary</text>
+
+  <rect class="box" x="64" y="744" width="342" height="82" rx="10" />
+  <text class="box-title" x="80" y="768">Client-side validation</text>
+  <text class="box-text" x="80" y="788">JPEG/PNG · 10 MB · audio type · 5 MB · 60 s</text>
+  <text class="box-text" x="80" y="806">Backend still validates the real bytes</text>
+
+  <!-- Backend column -->
+  <rect class="column" x="466" y="100" width="548" height="820" rx="16" />
+  <rect class="header-green" x="466" y="100" width="548" height="48" rx="16" />
+  <rect class="header-green" x="466" y="132" width="548" height="16" />
+  <text class="column-title" x="488" y="131">FastAPI backend · Python 3.12</text>
+
+  <rect class="box-green" x="490" y="174" width="500" height="86" rx="10" />
+  <text class="box-title" x="506" y="198">API routes</text>
+  <text class="box-text" x="506" y="218">POST /inspections · GET /inspections · GET /inspections/{id}</text>
+  <text class="box-text" x="506" y="236">/photo /overlay /thumbnail /report.pdf · /export.csv · /batches · /categories · /health</text>
+
+  <rect class="box" x="490" y="278" width="500" height="60" rx="10" />
+  <text class="box-title" x="506" y="302">Dependencies</text>
+  <text class="box-text" x="506" y="322">catalog · detector registry · persona · verifier · voice · report · repository · store</text>
+
+  <rect class="box" x="490" y="356" width="158" height="96" rx="10" />
+  <text class="box-title" x="504" y="380">InspectionService</text>
+  <text class="box-text" x="504" y="400">detect → assess</text>
+  <text class="box-text" x="504" y="418">returns Detection +</text>
+  <text class="box-text" x="504" y="436">Assessment + persona</text>
+
+  <rect class="box" x="661" y="356" width="158" height="96" rx="10" />
+  <text class="box-title" x="675" y="380">VoiceNoteService</text>
+  <text class="box-text" x="675" y="400">silence check →</text>
+  <text class="box-text" x="675" y="418">transcribe → sanitize</text>
+  <text class="box-text" x="675" y="436">no_speech / transcript</text>
+
+  <rect class="box" x="832" y="356" width="158" height="96" rx="10" />
+  <text class="box-title" x="846" y="380">ReportService</text>
+  <text class="box-text" x="846" y="400">facts → writer →</text>
+  <text class="box-text" x="846" y="418">validate → ground →</text>
+  <text class="box-text" x="846" y="436">retry → template fallback</text>
+
+  <rect class="box" x="490" y="472" width="150" height="74" rx="10" />
+  <text class="box-title" x="504" y="496">Rules</text>
+  <text class="box-text" x="504" y="516">verdict · confidence ·</text>
+  <text class="box-text" x="504" y="534">severity · location · action</text>
+
+  <rect class="box" x="652" y="472" width="150" height="74" rx="10" />
+  <text class="box-title" x="666" y="496">CategoryVerifier</text>
+  <text class="box-text" x="666" y="516">cosine similarity vs</text>
+  <text class="box-text" x="666" y="534">category prototype</text>
+
+  <rect class="box" x="814" y="472" width="176" height="74" rx="10" />
+  <text class="box-title" x="828" y="496">Batch service</text>
+  <text class="box-text" x="828" y="516">batch policy · decision</text>
+  <text class="box-text" x="828" y="534">counts · summary</text>
+
+  <rect class="box" x="490" y="566" width="160" height="86" rx="10" />
+  <text class="box-title" x="504" y="590">Repository</text>
+  <text class="box-text" x="504" y="610">SQLite, parameterized</text>
+  <text class="box-text" x="504" y="628">records, filters, paging</text>
+
+  <rect class="box" x="662" y="566" width="160" height="86" rx="10" />
+  <text class="box-title" x="676" y="590">ArtifactStore</text>
+  <text class="box-text" x="676" y="610">fixed safe names:</text>
+  <text class="box-text" x="676" y="628">photo, overlay, thumb, PDF</text>
+
+  <rect class="box" x="834" y="566" width="156" height="86" rx="10" />
+  <text class="box-title" x="848" y="590">PDF builder</text>
+  <text class="box-text" x="848" y="610">ReportLab, facts,</text>
+  <text class="box-text" x="848" y="628">images, transcript, notice</text>
+
+  <rect class="box-amber" x="490" y="674" width="500" height="96" rx="10" />
+  <text class="box-title" x="506" y="698">Boundary validation and domain errors</text>
+  <text class="box-text" x="506" y="718">Pydantic schemas · image/audio real-byte checks · size/pixel/duration caps</text>
+  <text class="box-text" x="506" y="736">path-traversal guards · category gate · 400 / 413 / 422 / 503 mapping</text>
+  <text class="box-text" x="506" y="754">no bare excepts; module loggers; no keys or transcript text in logs</text>
+
+  <rect class="box-green" x="490" y="790" width="500" height="92" rx="10" />
+  <text class="box-title" x="506" y="814">Lifespan</text>
+  <text class="box-text" x="506" y="834">create/migrate the SQLite schema once before serving requests;</text>
+  <text class="box-text" x="506" y="852">the PatchCore checkpoint and Whisper model load lazily on first use.</text>
+  <text class="box-text" x="506" y="870">One model per process is shared by all requests (demo scale).</text>
+
+  <!-- AI and storage column -->
+  <rect class="column" x="1040" y="100" width="420" height="820" rx="16" />
+  <rect class="header-amber" x="1040" y="100" width="420" height="48" rx="16" />
+  <rect class="header-amber" x="1040" y="132" width="420" height="16" />
+  <text class="column-title" x="1062" y="131">AI / model layer + storage</text>
+
+  <rect class="box-red" x="1064" y="174" width="372" height="86" rx="10" />
+  <text class="box-title" x="1080" y="198">PatchCore · Anomalib · local</text>
+  <text class="box-text" x="1080" y="218">one checkpoint per category; scores an image,</text>
+  <text class="box-text" x="1080" y="236">returns anomaly map + binary mask; MPS/CUDA/CPU</text>
+
+  <rect class="box" x="1064" y="278" width="372" height="76" rx="10" />
+  <text class="box-title" x="1080" y="302">Category gate · timm embedding</text>
+  <text class="box-text" x="1080" y="322">wide_resnet50_2.racm_in1k · L2-normalised mean</text>
+  <text class="box-text" x="1080" y="340">prototype per category · cosine cutoff</text>
+
+  <rect class="box" x="1064" y="372" width="372" height="76" rx="10" />
+  <text class="box-title" x="1080" y="396">faster-whisper · local</text>
+  <text class="box-text" x="1080" y="416">CPU int8 · VAD · lazy load · model base by default</text>
+  <text class="box-text" x="1080" y="434">silent audio never reaches the model</text>
+
+  <rect class="box" x="1064" y="466" width="372" height="74" rx="10" />
+  <text class="box-title" x="1080" y="490">Gemini report writer · optional</text>
+  <text class="box-text" x="1080" y="510">facts + downscaled photo + sanitized transcript</text>
+  <text class="box-text" x="1080" y="528">JSON schema · prompt injection guard</text>
+
+  <rect class="box" x="1064" y="558" width="372" height="74" rx="10" />
+  <text class="box-title" x="1080" y="582">Template report writer · offline</text>
+  <text class="box-text" x="1080" y="602">deterministic wording from the same fact strings</text>
+  <text class="box-text" x="1080" y="620">always available fallback, no key or network</text>
+
+  <rect class="box-green" x="1064" y="660" width="372" height="76" rx="10" />
+  <text class="box-title" x="1080" y="684">SQLite · reports + history</text>
+  <text class="box-text" x="1080" y="704">inspections table: indexed columns + full record JSON,</text>
+  <text class="box-text" x="1080" y="722">report_pdf_path, user_version migrations</text>
+
+  <rect class="box-green" x="1064" y="754" width="372" height="92" rx="10" />
+  <text class="box-title" x="1080" y="778">Artifact files · backend/data/uploads</text>
+  <text class="box-text" x="1080" y="798">{id}.png · {id}_overlay.png · {id}_thumb.jpg</text>
+  <text class="box-text" x="1080" y="816">{id}_report.pdf · random 32-hex id · zip-safe names</text>
+  <text class="box-text" x="1080" y="834">audio is never stored; only the transcript is kept</text>
+
+  <rect class="box-amber" x="1064" y="864" width="372" height="40" rx="10" />
+  <text class="note" x="1080" y="889">Code decides the facts. The LLM only words them.</text>
+
+  <!-- Arrows -->
+  <path class="arrow" d="M 406 569 L 486 569" />
+  <text class="small" x="410" y="558">HTTP</text>
+
+  <!-- Routes -> dependencies -> service row -->
+  <path class="arrow" d="M 740 260 L 740 274" />
+  <path class="arrow" d="M 740 338 L 740 348" />
+  <path class="line" d="M 569 344 L 911 344" />
+  <path class="arrow" d="M 569 344 L 569 352" />
+  <path class="arrow" d="M 740 344 L 740 352" />
+  <path class="arrow" d="M 910 344 L 910 352" />
+  <path class="arrow" d="M 569 452 L 569 468" />
+
+  <!-- Model calls: the service layer owns these calls; the AI column names the implementations. -->
+  <path class="arrow" d="M 990 430 L 1042 430 L 1042 500 L 1064 500" />
+  <text class="small" x="1016" y="424">word facts</text>
+  <path class="arrow" d="M 990 216 L 1064 216" />
+  <text class="small" x="992" y="206">image</text>
+  <path class="arrow-dash" d="M 990 440 L 1018 440 L 1018 595 L 1064 595" />
+  <text class="small" x="1020" y="588">fallback</text>
+
+  <!-- Persistence and artifacts -->
+  <path class="arrow" d="M 650 652 L 650 662 L 1000 662 L 1000 690 L 1064 690" />
+  <path class="arrow" d="M 910 652 L 910 666 L 1032 666 L 1032 800 L 1064 800" />
+  <text class="small" x="940" y="656">store</text>
+
+  <!-- Bottom legend -->
+  <rect x="40" y="944" width="1420" height="48" rx="10" fill="#e2efe9" stroke="#0f3d2e" stroke-width="1.2" />
+  <text class="note" x="62" y="974">Pipeline invariant: the detector and rules own verdict, severity, area, location and action; the LLM only words validated facts. Reports are schema-checked, number-grounded, retried, and fall back to the deterministic template.</text>
+</svg>
