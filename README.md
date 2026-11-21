@@ -26,7 +26,6 @@ PatchCore** (local vision), **faster-whisper** (local speech), **Gemini**
 - [Configuration](#configuration)
 - [Testing](#testing)
 - [Benchmarks](#benchmarks)
-- [Sample data and reports](#sample-data-and-reports)
 - [Security](#security)
 - [Limitations](#limitations)
 - [Documentation](#documentation)
@@ -96,21 +95,18 @@ The first voice request downloads the Whisper model. The cache is persisted in
 `backend/data/models-cache` through `HF_HOME` in `compose.yaml`.
 
 > **Model warning:** the trained checkpoints are ~108–120 MB each and are not in
-> the normal Git history. Without them the category catalog is empty. Read
-> [`docs/MODELS.md`](docs/MODELS.md) before running on a fresh clone. For the
-> complete three-category demo, publish the full ~301 MB model bundle as a
-> GitHub Release; the bottle-only zip (~108 MB) is only a smaller fallback.
+> the normal Git history. Without them the category catalog is empty. They are contained in a defect-inspector .zip file.
 
 ### Fresh clone with all three categories
 
-The full model bundle is a **~301 MB GitHub Release asset** (about 330 MB
+The full model bundle is the defect-inspector .zip file.(about 330 MB
 unpacked). After cloning:
 
 ```bash
 git clone <repo-url>
 cd defect-inspector
 
-# Download the release asset, then unpack it into backend/results.
+# Download the defect-inspector.zip, then unpack it into backend/results.
 unzip ~/Downloads/defect-inspector-models.zip -d backend/results
 
 cp backend/.env.example backend/.env
@@ -124,8 +120,6 @@ open http://localhost:5173
 build dominates the 10-minute budget. The optional first voice request downloads
 the Whisper model (~404 MB), so keep that out of the first-run timing.
 
-If no release asset is available, see [`docs/MODELS.md`](docs/MODELS.md) for
-Git LFS, release-bundle and retraining options.
 
 ## Local development
 
@@ -241,8 +235,7 @@ running.
 defect-inspector/
 ├── backend/                 FastAPI service, models, tests, configs, scripts
 ├── frontend/                React + Vite app, tests, nginx/Dockerfile
-├── samples/                 sample images, audio and generated PDFs
-├── docs/                    architecture, project guide, test cases, models
+├── docs/                    architecture, test cases, models
 ├── compose.yaml             backend + frontend Docker stack
 ├── .env.example             backend example at backend/.env.example
 └── README.md
@@ -325,23 +318,6 @@ Docker runs on Linux CPU, so use the CPU inference number as the container
 expectation. The first request after container start also pays the model-load
 cost.
 
-## Sample data and reports
-
-[`samples/`](samples/) contains:
-
-- six MVTec AD test images across bottle, screw and metal nut
-- a short WAV voice note
-- four generated PDF reports: pass, high-severity defect with voice note,
-  low-confidence review, and medium contamination
-
-See [`samples/README.md`](samples/README.md) for usage and attribution.
-Regenerate the PDFs with:
-
-```bash
-cd backend
-uv run python -m scripts.build_sample_reports
-```
-
 ## Security
 
 - No secrets in Git; `.env` is ignored and `.env.example` is committed.
@@ -374,12 +350,9 @@ uv run python -m scripts.build_sample_reports
 
 ## Documentation
 
-- [Complete project guide](docs/PROJECT_GUIDE.md) — study and revision guide
 - [Architecture](docs/ARCHITECTURE.md) — diagrams and component responsibilities
 - [Every test case](docs/TEST_CASES.md) — backend and frontend inventories
-- [File index](docs/FILE_INDEX.md) — one line per file
 - [Model distribution](docs/MODELS.md) — checkpoints, LFS, releases
-- [Sample assets](samples/README.md) — images, audio, PDFs and attribution
 
 ## Attribution
 
