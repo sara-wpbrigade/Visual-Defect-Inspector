@@ -15,3 +15,9 @@ data/
 uploads/
 results/
 lightning_logs/
+
+# Scratch/reference material kept out of the deliverable commit.
+/defect-inspector-handoff_1.md
+/step7-voice-note-reference_1/
+/step10-pdf-builder/
+/public/

@@ -25,3 +25,40 @@ export function formatFileSize(bytes) {
   }
   return `${(bytes / BYTES_PER_MEGABYTE).toFixed(MEGABYTE_DIGITS)} MB`;
 }
+/**
+ * Format a timestamp as a short relative string ("2 min ago", "3 h ago", "yesterday").
+ * Returns an empty string when the input is missing or unparseable.
+ *
+ * @param {string | number | Date | null | undefined} value
+ * @returns {string}
+ */
+export function relativeTime(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+  const diffMs = Date.now() - date.getTime();
+  const diffSec = Math.round(diffMs / 1000);
+  if (diffSec < 45) {
+    return 'just now';
+  }
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 60) {
+    return `${diffMin} min ago`;
+  }
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) {
+    return `${diffHr} h ago`;
+  }
+  const diffDay = Math.round(diffHr / 24);
+  if (diffDay === 1) {
+    return 'yesterday';
+  }
+  if (diffDay < 7) {
+    return `${diffDay} days ago`;
+  }
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}

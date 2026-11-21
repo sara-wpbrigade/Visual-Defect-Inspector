@@ -23,6 +23,7 @@ from .report import (
     ReportContent,
     ReportDraft,
 )
+from .voice import VoiceNoteResult, VoiceStatus
 
 __all__ = [
     "Action",
@@ -50,4 +51,6 @@ __all__ = [
     "ReportSource",
     "Severity",
     "Verdict",
+    "VoiceNoteResult",
+    "VoiceStatus",
 ]

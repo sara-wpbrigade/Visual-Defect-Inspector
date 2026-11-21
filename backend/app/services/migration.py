@@ -12,7 +12,7 @@ from app.services.repository import (
     CREATE_TABLE_SQL,
 )
 
-LATEST_VERSION = 2
+LATEST_VERSION = 3
 
 
 def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
@@ -27,7 +27,16 @@ def _add_category(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE inspections ADD COLUMN category TEXT NOT NULL DEFAULT 'unknown'")
 
 
-MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {2: _add_category}
+def _add_report_pdf_path(conn: sqlite3.Connection) -> None:
+    """Add the report_pdf_path column, defaulting existing rows to NULL."""
+    if not _column_exists(conn, "inspections", "report_pdf_path"):
+        conn.execute("ALTER TABLE inspections ADD COLUMN report_pdf_path TEXT NULL")
+
+
+MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    2: _add_category,
+    3: _add_report_pdf_path,
+}
 
 
 def initialize_schema(conn: sqlite3.Connection) -> None:

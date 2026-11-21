@@ -16,6 +16,11 @@ DEFAULT_THUMBNAIL_SIZE = 160
 MEGABYTE = 1024 * 1024
 DEFAULT_MAX_IMAGE_BYTES = 10 * MEGABYTE
 DEFAULT_MAX_IMAGE_PIXELS = 4096 * 4096
+DEFAULT_MAX_AUDIO_BYTES = 5 * MEGABYTE
+DEFAULT_MAX_AUDIO_SECONDS = 60.0
+DEFAULT_WHISPER_MODEL = "base"
+DEFAULT_WHISPER_DEVICE = "cpu"
+DEFAULT_WHISPER_COMPUTE_TYPE = "int8"
 DEFAULT_GEMINI_API_VERSION = "v1beta"
 DEFAULT_REPORT_TIMEOUT_SECONDS = 20.0
 DEFAULT_REPORT_IMAGE_MAX_SIDE = 1024
@@ -56,6 +61,11 @@ class Settings(BaseSettings):
     thumbnail_size: int = Field(default=DEFAULT_THUMBNAIL_SIZE, gt=0)
     max_image_bytes: int = Field(default=DEFAULT_MAX_IMAGE_BYTES, gt=0)
     max_image_pixels: int = Field(default=DEFAULT_MAX_IMAGE_PIXELS, gt=0)
+    max_audio_bytes: int = Field(default=DEFAULT_MAX_AUDIO_BYTES, gt=0)
+    max_audio_seconds: float = Field(default=DEFAULT_MAX_AUDIO_SECONDS, gt=0)
+    whisper_model: str = Field(default=DEFAULT_WHISPER_MODEL, min_length=1)
+    whisper_device: str = Field(default=DEFAULT_WHISPER_DEVICE, min_length=1)
+    whisper_compute_type: str = Field(default=DEFAULT_WHISPER_COMPUTE_TYPE, min_length=1)
 
     report_writer: ReportWriterKind = ReportWriterKind.GEMINI
     gemini_api_version: str = Field(default=DEFAULT_GEMINI_API_VERSION, min_length=1)

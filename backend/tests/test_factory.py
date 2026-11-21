@@ -8,8 +8,8 @@ from google import genai
 from pydantic import SecretStr
 
 from app.core.config import ReportWriterKind, Settings
-from app.models import patchcore
-from app.models.factory import create_detector, create_report_writer
+from app.models import patchcore, whisper_transcriber
+from app.models.factory import create_detector, create_report_writer, create_transcriber
 from app.models.gemini_writer import GeminiReportWriter
 from app.models.template_writer import TemplateReportWriter
 
@@ -42,6 +42,30 @@ def test_create_detector_uses_the_checkpoint_and_device(
     assert isinstance(detector, DetectorSpy)
     assert captured["checkpoint_path"] == ckpt
     assert captured["device"] == "cpu"
+
+
+def test_create_transcriber_uses_the_whisper_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The transcriber is built from the configured model, device and precision."""
+    captured: dict[str, Any] = {}
+
+    class TranscriberSpy:
+        """Record the constructor arguments instead of loading a model."""
+
+        def __init__(self, model_size: str, device: str, compute_type: str) -> None:
+            captured["model_size"] = model_size
+            captured["device"] = device
+            captured["compute_type"] = compute_type
+
+    monkeypatch.setattr(whisper_transcriber, "FasterWhisperTranscriber", TranscriberSpy)
+    settings = Settings(
+        report_writer=ReportWriterKind.TEMPLATE,
+        whisper_model="tiny",
+        whisper_device="cpu",
+        whisper_compute_type="int8",
+    )
+    transcriber = create_transcriber(settings)
+    assert isinstance(transcriber, TranscriberSpy)
+    assert captured == {"model_size": "tiny", "device": "cpu", "compute_type": "int8"}
 
 
 def test_create_writer_returns_the_offline_template() -> None:

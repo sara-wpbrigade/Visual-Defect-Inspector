@@ -1,8 +1,19 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { UploadPanel } from './UploadPanel';
+
+afterEach(() => {
+  delete window.navigator.mediaDevices;
+});
+
+const OTHER_CATEGORY = {
+  id: 'screw',
+  displayName: 'Screw',
+  description: 'MVTec AD screw category',
+  defectTypes: ['thread damage'],
+};
 
 function makePhoto(name = 'bottle.png', type = 'image/png', size) {
   const file = new File(['photo-bytes'], name, { type });
@@ -12,9 +23,27 @@ function makePhoto(name = 'bottle.png', type = 'image/png', size) {
   return file;
 }
 
+const CATEGORIES = [
+  {
+    id: 'bottle',
+    displayName: 'Bottle',
+    description: 'MVTec AD bottle category',
+    defectTypes: ['contamination'],
+  },
+];
+
 function renderPanel(overrides = {}) {
   const onInspect = vi.fn();
-  const view = render(<UploadPanel onInspect={onInspect} busy={false} {...overrides} />);
+  const view = render(
+    <UploadPanel
+      onInspect={onInspect}
+      busy={false}
+      categories={CATEGORIES}
+      selectedCategory="bottle"
+      onSelectCategory={vi.fn()}
+      {...overrides}
+    />,
+  );
   return { onInspect, ...view };
 }
 
@@ -117,9 +146,18 @@ describe('UploadPanel', () => {
 
   it('disables the actions while an inspection is running', async () => {
     const user = userEvent.setup();
-    const { rerender } = render(<UploadPanel onInspect={vi.fn()} busy={false} />);
+    const { rerender } = render(
+      <UploadPanel
+        onInspect={vi.fn()}
+        busy={false}
+        categories={CATEGORIES}
+        selectedCategory="bottle"
+      />,
+    );
     await user.upload(screen.getByLabelText('Choose a photo'), makePhoto());
-    rerender(<UploadPanel onInspect={vi.fn()} busy />);
+    rerender(
+      <UploadPanel onInspect={vi.fn()} busy categories={CATEGORIES} selectedCategory="bottle" />,
+    );
 
     expect(screen.getByRole('button', { name: 'Inspecting…' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Choose photo' })).toBeDisabled();
@@ -134,5 +172,158 @@ describe('UploadPanel', () => {
     unmount();
 
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview');
+  });
+
+  it('validates the optional batch id before allowing an inspection', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.upload(screen.getByLabelText('Choose a photo'), makePhoto());
+    const batchInput = screen.getByLabelText(/batch id/i);
+
+    await user.type(batchInput, 'bad id!');
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Use up to 40 characters');
+    expect(screen.getByRole('button', { name: 'Inspect photo' })).toBeDisabled();
+
+    await user.clear(batchInput);
+    await user.type(batchInput, 'batch-1');
+
+    expect(screen.getByRole('button', { name: 'Inspect photo' })).toBeEnabled();
+  });
+
+  it('reports batch id changes to the parent', async () => {
+    const user = userEvent.setup();
+    const onBatchIdChange = vi.fn();
+    renderPanel({ onBatchIdChange });
+
+    await user.type(screen.getByLabelText(/batch id/i), 'batch-1');
+
+    expect(onBatchIdChange).toHaveBeenLastCalledWith('batch-1');
+  });
+
+  it('forwards the selected category and batch id', async () => {
+    const user = userEvent.setup();
+    const onSelectCategory = vi.fn();
+    const { onInspect } = renderPanel({
+      categories: [CATEGORIES[0], OTHER_CATEGORY],
+      selectedCategory: 'bottle',
+      onSelectCategory,
+    });
+    const photo = makePhoto();
+
+    await user.selectOptions(screen.getByLabelText('Inspection Category'), 'screw');
+    expect(onSelectCategory).toHaveBeenCalledWith('screw');
+
+    await user.upload(screen.getByLabelText('Choose a photo'), photo);
+    await user.type(screen.getByLabelText(/batch id/i), 'batch-1');
+    await user.click(screen.getByRole('button', { name: 'Inspect photo' }));
+
+    expect(onInspect).toHaveBeenCalledWith(photo, {
+      category: 'bottle',
+      batchId: 'batch-1',
+      voiceNote: null,
+    });
+  });
+
+  it('attaches, previews and removes an uploaded voice note', async () => {
+    const user = userEvent.setup();
+    const { container } = renderPanel();
+    await user.click(screen.getByRole('button', { name: /optional voice note/i }));
+    const audio = new File(['audio-bytes'], 'note.wav', { type: 'audio/wav' });
+
+    await user.upload(screen.getByLabelText('Upload audio voice note'), audio);
+
+    expect(screen.getByText('note.wav')).toBeInTheDocument();
+    expect(screen.getByText(/voice note attached/i)).toBeInTheDocument();
+    expect(container.querySelector('audio')).toHaveAttribute('src', 'blob:preview');
+
+    await user.click(screen.getByRole('button', { name: 'Remove note' }));
+
+    expect(screen.queryByText('note.wav')).not.toBeInTheDocument();
+    expect(screen.queryByText(/voice note attached/i)).not.toBeInTheDocument();
+  });
+
+  it('rejects empty, oversized and unsupported audio files', async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    renderPanel();
+    await user.click(screen.getByRole('button', { name: /optional voice note/i }));
+    const input = screen.getByLabelText('Upload audio voice note');
+
+    await user.upload(input, new File([], 'empty.wav', { type: 'audio/wav' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('That audio file is empty.');
+
+    const big = new File(['audio'], 'big.wav', { type: 'audio/wav' });
+    Object.defineProperty(big, 'size', { value: 6 * 1024 * 1024 });
+    await user.upload(input, big);
+    expect(screen.getByRole('alert')).toHaveTextContent('Audio file must be under 5 MB.');
+
+    await user.upload(input, new File(['audio'], 'note.txt', { type: 'text/plain' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Use an audio file in WAV');
+  });
+
+  it('explains when recording is unsupported', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByRole('button', { name: /optional voice note/i }));
+
+    await user.click(screen.getByRole('button', { name: 'Record voice note' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Audio recording is not supported in this browser.',
+    );
+  });
+
+  it('explains a denied microphone permission', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window.navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockRejectedValue(new Error('denied')) },
+    });
+    renderPanel();
+    await user.click(screen.getByRole('button', { name: /optional voice note/i }));
+
+    await user.click(screen.getByRole('button', { name: 'Record voice note' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Microphone permission was denied or microphone is unavailable.',
+    );
+  });
+
+  it('records a voice note and stops at the operator request', async () => {
+    const user = userEvent.setup();
+    class FakeMediaRecorder {
+      constructor() {
+        this.state = 'inactive';
+        this.mimeType = 'audio/webm';
+      }
+
+      start() {
+        this.state = 'recording';
+      }
+
+      stop() {
+        this.state = 'inactive';
+        this.ondataavailable?.({ data: new Blob(['audio']) });
+        this.onstop?.();
+      }
+    }
+    const track = { stop: vi.fn() };
+    Object.defineProperty(window.navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [track] }),
+      },
+    });
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder);
+    renderPanel();
+    await user.click(screen.getByRole('button', { name: /optional voice note/i }));
+
+    await user.click(screen.getByRole('button', { name: 'Record voice note' }));
+    expect(screen.getByRole('button', { name: /stop recording/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /stop recording/i }));
+
+    expect(screen.getByText('voice-note.webm')).toBeInTheDocument();
+    expect(track.stop).toHaveBeenCalledOnce();
   });
 });

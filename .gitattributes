@@ -1,0 +1,9 @@
+# Trained detector checkpoints and prototypes are binary and large.
+# Use Git LFS if you distribute them with the repository.
+backend/results/Patchcore/**/*.ckpt filter=lfs diff=lfs merge=lfs -text
+backend/results/prototypes/*.npz filter=lfs diff=lfs merge=lfs -text
+
+# Keep sample PDFs and images as normal binary files, not text diffs.
+samples/**/*.pdf binary
+samples/**/*.png binary
+samples/**/*.wav binary

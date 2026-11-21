@@ -15,11 +15,13 @@ INSPECTION_ID_PATTERN = re.compile(INSPECTION_ID_PATTERN_TEXT)
 PHOTO_KIND = "photo"
 OVERLAY_KIND = "overlay"
 THUMBNAIL_KIND = "thumbnail"
+REPORT_KIND = "report"
 
 ARTIFACT_NAMES = {
     PHOTO_KIND: "{inspection_id}.png",
     OVERLAY_KIND: "{inspection_id}_overlay.png",
     THUMBNAIL_KIND: "{inspection_id}_thumb.jpg",
+    REPORT_KIND: "{inspection_id}_report.pdf",
 }
 ARTIFACT_FORMATS = {
     PHOTO_KIND: "PNG",
@@ -30,6 +32,7 @@ ARTIFACT_MEDIA_TYPES = {
     PHOTO_KIND: "image/png",
     OVERLAY_KIND: "image/png",
     THUMBNAIL_KIND: "image/jpeg",
+    REPORT_KIND: "application/pdf",
 }
 ARTIFACT_OPTIONS = {
     THUMBNAIL_KIND: {"quality": 90},
@@ -49,6 +52,11 @@ class InvalidInspectionIdError(StorageError):
 def new_inspection_id() -> str:
     """Return a fresh random inspection id."""
     return uuid4().hex
+
+
+def report_filename(inspection_id: str) -> str:
+    """Return the relative filename for a PDF report."""
+    return f"{inspection_id}_report.pdf"
 
 
 def validate_inspection_id(inspection_id: str) -> str:
@@ -80,4 +88,12 @@ class ArtifactStore:
         self._directory.mkdir(parents=True, exist_ok=True)
         image.save(path, format=ARTIFACT_FORMATS[kind], **ARTIFACT_OPTIONS.get(kind, {}))
         logger.info("Stored %s artifact for inspection %s", kind, inspection_id)
+        return path
+
+    def save_bytes(self, data: bytes, inspection_id: str, kind: str) -> Path:
+        """Write raw bytes under the fixed artifact path and return the path."""
+        path = self.path_for(inspection_id, kind)
+        self._directory.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        logger.info("Stored raw bytes for %s artifact for %s", kind, inspection_id)
         return path

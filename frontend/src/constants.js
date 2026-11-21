@@ -8,6 +8,24 @@ export const ALLOWED_IMAGE_EXTENSIONS = Object.freeze(['.jpg', '.jpeg', '.png'])
 export const PHOTO_ACCEPT = ALLOWED_IMAGE_TYPES.join(',');
 export const CAMERA_ACCEPT = 'image/*';
 
+export const MAX_AUDIO_MEGABYTES = 5;
+export const MAX_AUDIO_BYTES = MAX_AUDIO_MEGABYTES * 1024 * 1024;
+export const MAX_AUDIO_SECONDS = 60;
+export const ALLOWED_AUDIO_TYPES = Object.freeze([
+  'audio/wav',
+  'audio/wave',
+  'audio/x-wav',
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/ogg',
+  'audio/webm',
+  'audio/mp4',
+  'audio/x-m4a',
+  'audio/aac',
+]);
+export const AUDIO_ACCEPT =
+  'audio/wav,audio/wave,audio/x-wav,audio/mpeg,audio/mp3,audio/ogg,audio/webm,audio/mp4,audio/x-m4a,audio/aac,.wav,.mp3,.ogg,.webm,.m4a,.aac';
+
 export const STATUS = Object.freeze({
   IDLE: 'idle',
   LOADING: 'loading',
@@ -46,6 +64,20 @@ export const ACTION_HINTS = Object.freeze({
   re_inspect: 'Inspect the item again or ask a second operator to review it.',
 });
 
+export const BATCH_DECISIONS = Object.freeze({
+  PASSED: 'Passed',
+  REJECTED: 'Rejected',
+  NEEDS_REVIEW: 'Needs review',
+});
+
+export const BATCH_DECISION_LABELS = Object.freeze({
+  [BATCH_DECISIONS.PASSED]: 'Pass',
+  [BATCH_DECISIONS.REJECTED]: 'Reject',
+  [BATCH_DECISIONS.NEEDS_REVIEW]: 'Needs review',
+});
+
+export const BATCH_ID_REGEX = /^[A-Za-z0-9_-]{1,40}$/;
+
 export const REPORT_SECTION_TITLE = 'Report';
 export const REPORT_SOURCE_LABELS = Object.freeze({
   ai: 'AI-written',
@@ -59,6 +91,16 @@ export const DEFECT_TYPE_NOT_DETERMINED = 'not determined';
 export const FLAGGED_AREA_LABEL = 'Flagged area';
 export const MANUAL_REVIEW_TITLE = 'Manual review required';
 export const VOICE_CONFLICT_LABEL = 'Voice note conflict';
+
+export const CATEGORY_ERROR_CODES = Object.freeze({
+  UNKNOWN_CATEGORY: 'unknown_category',
+  CATEGORY_MISMATCH: 'category_mismatch',
+});
+
+export const VIEW_TABS = Object.freeze({
+  INSPECT: 'inspect',
+  BATCHES: 'batches',
+});
 
 export const HTTP_BAD_REQUEST = 400;
 export const HTTP_PAYLOAD_TOO_LARGE = 413;

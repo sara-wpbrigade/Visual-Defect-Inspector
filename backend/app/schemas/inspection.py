@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from .assessment import InspectionOutcome
 from .report import InspectionReport
+from .voice import VoiceNoteResult
 
 BATCH_ID_PATTERN = r"^[A-Za-z0-9_-]{1,40}$"
 CATEGORY_ID_PATTERN = r"^[a-z][a-z0-9_]{0,40}$"
@@ -17,6 +18,7 @@ class InspectionResult(InspectionOutcome):
     inspection_id: str = Field(min_length=1)
     category: str = Field(min_length=1)
     report: InspectionReport
+    voice_note: VoiceNoteResult | None = None
 
 
 class ImageUrls(BaseModel):
@@ -32,4 +34,7 @@ class InspectionCreated(InspectionResult):
 
     created_at: datetime
     batch_id: str | None = None
+    batch_decision: str | None = None
+    report_pdf_available: bool = False
+    report_pdf_url: str | None = None
     images: ImageUrls

@@ -1,5 +1,7 @@
 """Test doubles and fixed data shared by the test suite."""
 
+import io
+import wave
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
@@ -10,6 +12,7 @@ from PIL import Image
 from app.core.categories import CategoryCatalog, CategoryConfig
 from app.models.detector import Detection, Detector
 from app.models.registry import DetectorRegistry
+from app.models.transcriber import Transcript
 from app.schemas import ReportDraft, ReportSource
 from app.services.report_facts import ReportFacts
 
@@ -19,6 +22,7 @@ PERSONA_DATA = {
     "decision_cutoff": 0.5,
     "review_margin": 0.1,
     "severity_bands": {"low_max": 0.01, "medium_max": 0.05},
+    "batch_policy": {"reject_min_severity": "low"},
     "on_pass": "accept",
     "on_uncertain": "re_inspect",
     "on_defect": {"low": "rework", "medium": "rework", "high": "reject"},
@@ -86,6 +90,23 @@ class StubDetector:
         return self._result
 
 
+class StubTranscriber:
+    """Transcriber that returns an injected result (or error) and counts its calls."""
+
+    def __init__(self, result: Transcript | Exception) -> None:
+        """Remember what transcribe() should do."""
+        self._result = result
+        self.calls = 0
+
+    def transcribe(self, samples: np.ndarray) -> Transcript:
+        """Return the injected result, or raise the injected error."""
+        del samples
+        self.calls += 1
+        if isinstance(self._result, Exception):
+            raise self._result
+        return self._result
+
+
 class StubDetectorRegistry(DetectorRegistry):
     """Detector registry that returns stubs without loading any model."""
 
@@ -134,6 +155,25 @@ def make_detection(score: float, flagged: int = 0, total: int = 100) -> Detectio
     mask = np.zeros(total, dtype=bool)
     mask[:flagged] = True
     return Detection(score=score, anomaly_map=mask.astype(np.float32), mask=mask)
+
+
+TEST_SAMPLE_RATE = 16_000
+TEST_TONE_HZ = 440
+INT16_MAX = 32767
+
+
+def make_wav(seconds: float = 1.0, amplitude: float = 0.5, rate: int = TEST_SAMPLE_RATE) -> bytes:
+    """Build a mono WAV file holding a sine tone; amplitude 0 makes it silent."""
+    times = np.arange(int(seconds * rate)) / rate
+    tone = amplitude * np.sin(2 * np.pi * TEST_TONE_HZ * times)
+    pcm = (tone * INT16_MAX).astype("<i2")
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(rate)
+        wav_file.writeframes(pcm.tobytes())
+    return buffer.getvalue()
 
 
 class StubReportWriter:

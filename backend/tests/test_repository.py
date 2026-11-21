@@ -17,7 +17,7 @@ from app.schemas import (
     Severity,
     Verdict,
 )
-from app.services.repository import InspectionRecord, SqliteInspectionRepository, image_urls
+from app.services.repository import InspectionRecord, SqliteInspectionRepository
 from app.services.storage import StorageError
 
 INSPECTION_ID = "0123456789abcdef0123456789abcdef"
@@ -149,15 +149,14 @@ def test_count_totals_and_filters(repository: SqliteInspectionRepository) -> Non
 def test_summary_carries_the_history_fields(
     repository: SqliteInspectionRepository,
 ) -> None:
-    """A summary exposes the verdict fields and the thumbnail URL."""
+    """A listed record exposes the assessment fields, batch id and images."""
     repository.add(make_record(INSPECTION_ID, BASE_TIME, batch_id="batch_1"))
-    summary = repository.list(limit=10, offset=0)[0]
-    assert summary.verdict is Verdict.DEFECT
-    assert summary.severity is Severity.HIGH
-    assert summary.action is Action.REJECT
-    assert summary.needs_review is False
-    assert summary.batch_id == "batch_1"
-    assert summary.thumbnail_url == image_urls(INSPECTION_ID).thumbnail
+    record = repository.list(limit=10, offset=0)[0]
+    assert record.assessment.verdict is Verdict.DEFECT
+    assert record.assessment.severity is Severity.HIGH
+    assert record.assessment.action is Action.REJECT
+    assert record.assessment.needs_review is False
+    assert record.batch_id == "batch_1"
 
 
 def test_hostile_values_are_kept_as_plain_data(
@@ -276,5 +275,5 @@ def test_version_one_database_is_migrated(tmp_path: Path) -> None:
         columns = connection.execute("PRAGMA table_info(inspections)").fetchall()
     finally:
         connection.close()
-    assert version == 2
+    assert version == 3
     assert "category" in {row[1] for row in columns}

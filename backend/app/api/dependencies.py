@@ -9,15 +9,17 @@ from app.core.categories import CategoryCatalog, load_categories
 from app.core.config import Settings, get_settings
 from app.core.persona import PersonaConfig, load_persona
 from app.models.embedding_classifier import EmbeddingCategoryClassifier
-from app.models.factory import create_report_writer
+from app.models.factory import create_report_writer, create_transcriber
 from app.models.registry import DetectorRegistry
 from app.models.report_writer import ReportWriter
 from app.models.template_writer import TemplateReportWriter
+from app.models.transcriber import Transcriber
 from app.services.category_verifier import CategoryVerifier
 from app.services.inspection import InspectionService
 from app.services.report import ReportService, utc_now
 from app.services.repository import InspectionRepository, SqliteInspectionRepository
 from app.services.storage import ArtifactStore
+from app.services.voice import VoiceNoteService
 
 
 @lru_cache
@@ -48,12 +50,33 @@ def get_inspection_service(
     return InspectionService(registry=registry, base_persona=persona)
 
 
+def get_persona_by_category() -> dict[str, PersonaConfig]:
+    """Map each available category id to an effective PersonaConfig."""
+    settings = get_settings()
+    catalog = get_category_catalog()
+    base = load_persona(settings.persona_name)
+    return {c.id: base.for_category(c) for c in catalog.all()}
+
+
 @lru_cache
 def get_category_verifier() -> CategoryVerifier:
     """Return the yes/no category gate backed by the embedding classifier."""
     catalog = get_category_catalog()
     classifier = EmbeddingCategoryClassifier(catalog, device=get_settings().detector_device)
     return CategoryVerifier(catalog, classifier)
+
+
+@lru_cache
+def get_transcriber() -> Transcriber:
+    """Return the configured transcriber, loading the speech model once per process."""
+    return create_transcriber(get_settings())
+
+
+def get_voice_service(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> VoiceNoteService:
+    """Build the voice service; the speech model loads only when a note needs it."""
+    return VoiceNoteService(get_transcriber, settings.max_transcript_chars)
 
 
 @lru_cache

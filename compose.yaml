@@ -5,6 +5,9 @@ services:
       - "8000:8000"
     env_file:
       - ./backend/.env
+    environment:
+      # Keep the downloaded Whisper model inside the mounted data folder.
+      HF_HOME: /app/data/models-cache
     volumes:
       - ./backend/results:/app/results:ro
       - ./backend/data:/app/data
@@ -13,3 +16,11 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy

@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.batches import router as batches_router
 from app.api.categories import router as categories_router
 from app.api.dependencies import build_repository
 from app.api.errors import register_exception_handlers
@@ -26,6 +27,7 @@ app = FastAPI(title="Visual Defect Inspector", lifespan=lifespan)
 
 app.include_router(inspections_router)
 app.include_router(history_router)
+app.include_router(batches_router)
 app.include_router(categories_router)
 
 register_exception_handlers(app)

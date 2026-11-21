@@ -14,6 +14,8 @@ export default defineConfig({
     proxy: {
       '/inspections': { target: BACKEND_TARGET, changeOrigin: true },
       '/health': { target: BACKEND_TARGET, changeOrigin: true },
+      '/batches': { target: BACKEND_TARGET, changeOrigin: true },
+      '/categories': { target: BACKEND_TARGET, changeOrigin: true },
     },
   },
   test: {

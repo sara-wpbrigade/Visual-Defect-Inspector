@@ -29,6 +29,24 @@ class SeverityBands(BaseModel):
         return self
 
 
+class BatchPolicy(BaseModel):
+    """Rules deciding when a batch is rejected based on defect severity."""
+
+    reject_min_severity: Severity = Field(
+        default=Severity.LOW,
+        description="Minimum defect severity that triggers a batch rejection.",
+    )
+
+    @field_validator("reject_min_severity")
+    @classmethod
+    def check_defect_severity(cls, value: Severity) -> Severity:
+        """Allow only defect severities (low, medium, high)."""
+        if value not in DEFECT_SEVERITIES:
+            allowed = ", ".join(s.value for s in DEFECT_SEVERITIES)
+            raise ValueError(f"reject_min_severity must be one of: {allowed}")
+        return value
+
+
 class PersonaReport(BaseModel):
     """How a report should read for this persona."""
 
@@ -45,6 +63,7 @@ class PersonaConfig(BaseModel):
     decision_cutoff: float = Field(gt=0, lt=1)
     review_margin: float = Field(ge=0, lt=0.5)
     severity_bands: SeverityBands
+    batch_policy: BatchPolicy = Field(default_factory=BatchPolicy)
     on_pass: Action
     on_uncertain: Action
     on_defect: dict[Severity, Action]

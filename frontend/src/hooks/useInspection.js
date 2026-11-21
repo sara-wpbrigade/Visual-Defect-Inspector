@@ -11,10 +11,13 @@ const INITIAL_STATE = Object.freeze({ status: STATUS.IDLE, result: null, error: 
 export function useInspection() {
   const [state, setState] = useState(INITIAL_STATE);
 
-  const inspect = useCallback(async (file) => {
+  const inspect = useCallback(async (file, options) => {
     setState({ status: STATUS.LOADING, result: null, error: null });
     try {
-      const result = await createInspection(file);
+      const result =
+        options !== undefined
+          ? await createInspection(file, options)
+          : await createInspection(file);
       setState({ status: STATUS.SUCCESS, result, error: null });
       return result;
     } catch (error) {

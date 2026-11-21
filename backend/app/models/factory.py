@@ -6,6 +6,7 @@ from app.core.config import MILLISECONDS_PER_SECOND, ReportWriterKind, Settings
 from app.models.detector import Detector
 from app.models.report_writer import ReportWriter
 from app.models.template_writer import TemplateReportWriter
+from app.models.transcriber import Transcriber
 
 GEMINI_SETTINGS_ERROR = "Gemini report writing requires GEMINI_API_KEY and GEMINI_MODEL."
 
@@ -19,6 +20,19 @@ def create_detector(checkpoint_path: Path, device: str) -> Detector:
     from app.models.patchcore import PatchCoreDetector
 
     return PatchCoreDetector(checkpoint_path, device)
+
+
+def create_transcriber(settings: Settings) -> Transcriber:
+    """Return the configured transcriber, importing Whisper only when a note needs it.
+
+    Loading the speech model is slow and only inspections that carry a voice
+    note need it, so the import and the model load are both deferred.
+    """
+    from app.models.whisper_transcriber import FasterWhisperTranscriber
+
+    return FasterWhisperTranscriber(
+        settings.whisper_model, settings.whisper_device, settings.whisper_compute_type
+    )
 
 
 def create_report_writer(settings: Settings) -> ReportWriter:

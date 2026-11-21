@@ -88,6 +88,19 @@ describe('useInspection', () => {
     expect(result.current.result).toBeNull();
   });
 
+  it('forwards category, batch and voice-note options', async () => {
+    createInspection.mockResolvedValue(RESULT);
+    const options = { category: 'bottle', batchId: 'batch-1', voiceNote: null };
+    const { result } = renderHook(() => useInspection());
+
+    await act(async () => {
+      await result.current.inspect(photo, options);
+    });
+
+    expect(createInspection).toHaveBeenCalledWith(photo, options);
+    expect(result.current.status).toBe(STATUS.SUCCESS);
+  });
+
   it('resets back to the idle state', async () => {
     createInspection.mockResolvedValue(RESULT);
     const { result } = renderHook(() => useInspection());

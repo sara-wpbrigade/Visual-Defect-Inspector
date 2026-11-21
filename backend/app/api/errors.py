@@ -3,16 +3,21 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.core.audio import AudioTooLargeError, InvalidAudioError
 from app.core.exceptions import CategoryError
 from app.core.images import ImageTooLargeError, InvalidImageError
 from app.services.inspection import DetectionError
 from app.services.repository import InspectionNotFoundError
 from app.services.storage import StorageError
+from app.services.voice import TranscriptionError
 
 INVALID_IMAGE_STATUS = 400
+INVALID_AUDIO_STATUS = 400
 IMAGE_TOO_LARGE_STATUS = 413
+AUDIO_TOO_LARGE_STATUS = 413
 UNPROCESSABLE_STATUS = 422
 DETECTION_FAILED_STATUS = 503
+TRANSCRIPTION_FAILED_STATUS = 503
 INSPECTION_NOT_FOUND_STATUS = 404
 STORAGE_UNAVAILABLE_STATUS = 503
 
@@ -29,10 +34,28 @@ async def _image_too_large(request: Request, exc: Exception) -> JSONResponse:
     return _error_response(IMAGE_TOO_LARGE_STATUS, exc)
 
 
+async def _invalid_audio(request: Request, exc: Exception) -> JSONResponse:
+    """Answer 400 when an uploaded voice note is not usable audio."""
+    del request
+    return _error_response(INVALID_AUDIO_STATUS, exc)
+
+
+async def _audio_too_large(request: Request, exc: Exception) -> JSONResponse:
+    """Answer 413 when a voice note is over the byte or duration limit."""
+    del request
+    return _error_response(AUDIO_TOO_LARGE_STATUS, exc)
+
+
 async def _detection_failed(request: Request, exc: Exception) -> JSONResponse:
     """Answer 503 when the model could not analyse the image."""
     del request
     return _error_response(DETECTION_FAILED_STATUS, exc)
+
+
+async def _transcription_failed(request: Request, exc: Exception) -> JSONResponse:
+    """Answer 503 when the speech model could not transcribe the voice note."""
+    del request
+    return _error_response(TRANSCRIPTION_FAILED_STATUS, exc)
 
 
 async def _inspection_not_found(request: Request, exc: Exception) -> JSONResponse:
@@ -71,7 +94,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     """Attach the domain error handlers to the application."""
     app.add_exception_handler(InvalidImageError, _invalid_image)
     app.add_exception_handler(ImageTooLargeError, _image_too_large)
+    app.add_exception_handler(InvalidAudioError, _invalid_audio)
+    app.add_exception_handler(AudioTooLargeError, _audio_too_large)
     app.add_exception_handler(DetectionError, _detection_failed)
+    app.add_exception_handler(TranscriptionError, _transcription_failed)
     app.add_exception_handler(InspectionNotFoundError, _inspection_not_found)
     app.add_exception_handler(StorageError, _storage_unavailable)
     app.add_exception_handler(CategoryError, _category_error)

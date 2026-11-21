@@ -17,6 +17,7 @@ from app.schemas import (
     InspectionReport,
     Severity,
     Verdict,
+    VoiceNoteResult,
 )
 from app.services.storage import (
     INSPECTION_ID_PATTERN_TEXT,
@@ -49,6 +50,7 @@ CREATE TABLE IF NOT EXISTS inspections (
     area_ratio REAL NOT NULL,
     region TEXT,
     defect_type TEXT,
+    report_pdf_path TEXT,
     record_json TEXT NOT NULL
 )
 """
@@ -68,11 +70,26 @@ CREATE_CATEGORY_INDEX_SQL = (
 INSERT_SQL = """
 INSERT INTO inspections (
     id, created_at, persona, batch_id, category, verdict, severity, action,
-    confidence, needs_review, score, area_ratio, region, defect_type, record_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    confidence, needs_review, score, area_ratio, region, defect_type, report_pdf_path, record_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
-SELECT_RECORD_SQL = "SELECT record_json FROM inspections WHERE id = ?"
-SELECT_SUMMARIES_SQL = "SELECT id, created_at, batch_id, record_json FROM inspections"
+UPDATE_PDF_PATH_SQL = "UPDATE inspections SET report_pdf_path = ? WHERE id = ?"
+SELECT_RECORD_SQL = "SELECT record_json, report_pdf_path FROM inspections WHERE id = ?"
+SELECT_SUMMARIES_SQL = (
+    "SELECT id, created_at, batch_id, report_pdf_path, record_json FROM inspections"
+)
+SELECT_BATCH_ITEMS_SQL = (
+    "SELECT record_json, report_pdf_path FROM inspections "
+    "WHERE batch_id = ? ORDER BY created_at ASC"
+)
+SELECT_BATCH_IDS_SQL = (
+    "SELECT batch_id FROM inspections "
+    "WHERE batch_id IS NOT NULL AND batch_id != '' "
+    "GROUP BY batch_id ORDER BY MAX(created_at) DESC LIMIT ? OFFSET ?"
+)
+SELECT_EXPORT_SQL = """
+SELECT record_json, report_pdf_path FROM inspections
+"""
 COUNT_SQL = "SELECT COUNT(*) FROM inspections"
 
 
@@ -91,6 +108,8 @@ class InspectionRecord(BaseModel):
     score: float = Field(ge=0)
     assessment: Assessment
     report: InspectionReport
+    voice_note: VoiceNoteResult | None = None
+    report_pdf_path: str | None = None
 
 
 class InspectionSummary(BaseModel):
@@ -106,12 +125,18 @@ class InspectionSummary(BaseModel):
     confidence: float = Field(ge=0, le=1)
     needs_review: bool
     thumbnail_url: str
+    batch_decision: str | None = None
+    report_pdf_available: bool = False
+    report_pdf_url: str | None = None
 
 
 class InspectionDetail(InspectionRecord):
     """One stored inspection plus its image URLs."""
 
     images: ImageUrls
+    batch_decision: str | None = None
+    report_pdf_available: bool = False
+    report_pdf_url: str | None = None
 
 
 class InspectionHistory(BaseModel):
@@ -132,14 +157,26 @@ class InspectionRepository(Protocol):
         """Return one record, or None when the id is unknown."""
         ...
 
+    def set_report_pdf_path(self, inspection_id: str, name: str | None) -> None:
+        """Update the report_pdf_path column for an inspection."""
+        ...
+
+    def items_in_batch(self, batch_id: str) -> list[InspectionRecord]:
+        """Return all items belonging to a batch, ordered by creation time."""
+        ...
+
+    def list_batches(self, limit: int, offset: int) -> list[str]:
+        """Return the newest batch IDs by last inspection time."""
+        ...
+
     def list(
         self,
         limit: int,
         offset: int,
         batch_id: str | None = None,
         category: str | None = None,
-    ) -> list[InspectionSummary]:
-        """Return the newest summaries first, optionally filtered."""
+    ) -> list[InspectionRecord]:
+        """Return the newest records first, optionally filtered."""
         ...
 
     def count(self, batch_id: str | None = None, category: str | None = None) -> int:
@@ -196,9 +233,16 @@ class SqliteInspectionRepository:
                     assessment.area_ratio,
                     location.region if location is not None else None,
                     record.report.content.defect_type,
+                    record.report_pdf_path,
                     record.model_dump_json(),
                 ),
             )
+
+    def set_report_pdf_path(self, inspection_id: str, name: str | None) -> None:
+        """Set the report_pdf_path file name for an inspection."""
+        validate_inspection_id(inspection_id)
+        with self._connect() as connection:
+            connection.execute(UPDATE_PDF_PATH_SQL, (name, inspection_id))
 
     def get(self, inspection_id: str) -> InspectionRecord | None:
         """Return one record, or None when the id is unknown."""
@@ -207,7 +251,19 @@ class SqliteInspectionRepository:
             row = connection.execute(SELECT_RECORD_SQL, (inspection_id,)).fetchone()
         if row is None:
             return None
-        return _parse_record(row[0])
+        return _parse_record(row[0], row[1])
+
+    def items_in_batch(self, batch_id: str) -> list[InspectionRecord]:
+        """Return all items belonging to a batch, ordered by creation time."""
+        with self._connect() as connection:
+            rows = connection.execute(SELECT_BATCH_ITEMS_SQL, (batch_id,)).fetchall()
+        return [_parse_record(row[0], row[1]) for row in rows]
+
+    def list_batches(self, limit: int, offset: int) -> list[str]:
+        """Return newest unique batch ids."""
+        with self._connect() as connection:
+            rows = connection.execute(SELECT_BATCH_IDS_SQL, (limit, offset)).fetchall()
+        return [row[0] for row in rows]
 
     def list(
         self,
@@ -215,13 +271,13 @@ class SqliteInspectionRepository:
         offset: int,
         batch_id: str | None = None,
         category: str | None = None,
-    ) -> list[InspectionSummary]:
-        """Return the newest summaries first, optionally filtered."""
+    ) -> list[InspectionRecord]:
+        """Return the newest records first, optionally filtered."""
         where, filters = _filters(batch_id, category)
         query = f"{SELECT_SUMMARIES_SQL}{where} ORDER BY created_at DESC LIMIT ? OFFSET ?"
         with self._connect() as connection:
             rows = connection.execute(query, (*filters, limit, offset)).fetchall()
-        return [_summary(_parse_record(row[3])) for row in rows]
+        return [_parse_record(row[4], row[3]) for row in rows]
 
     def count(self, batch_id: str | None = None, category: str | None = None) -> int:
         """Return how many records exist, optionally filtered."""
@@ -261,30 +317,16 @@ def _filters(batch_id: str | None, category: str | None) -> tuple[str, list[str]
     return " WHERE " + " AND ".join(clauses), params
 
 
-def _summary(record: InspectionRecord) -> InspectionSummary:
-    """Project one stored record into a history row."""
-    assessment = record.assessment
-    return InspectionSummary(
-        id=record.id,
-        created_at=record.created_at,
-        category=record.category,
-        batch_id=record.batch_id,
-        verdict=assessment.verdict,
-        severity=assessment.severity,
-        action=assessment.action,
-        confidence=assessment.confidence,
-        needs_review=assessment.needs_review,
-        thumbnail_url=image_urls(record.id).thumbnail,
-    )
-
-
-def _parse_record(record_json: str) -> InspectionRecord:
-    """Re-validate one stored record, turning corruption into a domain error."""
+def _parse_record(raw: str, report_pdf_path: str | None = None) -> InspectionRecord:
+    """Re-validate one stored record and attach the current report_pdf_path."""
     try:
-        return InspectionRecord.model_validate_json(record_json)
+        record = InspectionRecord.model_validate_json(raw)
     except (ValueError, TypeError) as exc:
         logger.exception("A stored inspection record is corrupt")
         raise StorageError(CORRUPT_RECORD_MESSAGE) from exc
+    if report_pdf_path is not None:
+        record.report_pdf_path = report_pdf_path
+    return record
 
 
 def _format_timestamp(value: datetime) -> str:

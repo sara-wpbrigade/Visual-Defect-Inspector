@@ -55,6 +55,23 @@ setting is gone: checkpoints now come from the per-category JSON files.
 5. Restart the service. `GET /categories` now lists the category, and
    `POST /inspections` accepts its id as the required `category` field.
 
+## Optional voice note
+
+`POST /inspections` also accepts an optional multipart field `voice_note`. The
+audio container is read from the bytes (WAV, MP3, OGG, WebM or M4A), capped at
+5 MB and 60 seconds. A local faster-whisper model transcribes it on CPU
+(`int8`), the text is cleaned and length-capped, and only the transcript is
+stored with the inspection; the audio itself is never saved.
+
+- Silent or speechless audio returns `voice_note.status = "no_speech"` and never
+  loads the model.
+- A transcribed note is passed to the report writer and is included in the PDF.
+- The first voice request downloads the model (`base`, about 145 MB). Override
+  it with `WHISPER_MODEL`, `WHISPER_DEVICE` and `WHISPER_COMPUTE_TYPE`; in Docker
+  the cache lives under the mounted data folder via `HF_HOME`.
+- Invalid audio is `400`, over the byte or duration limit is `413`, and a speech
+  model failure is `503`.
+
 ## Checks
 
 From `backend/`:

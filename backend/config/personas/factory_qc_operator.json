@@ -4,6 +4,7 @@
   "decision_cutoff": 0.5,
   "review_margin": 0.1,
   "severity_bands": {"low_max": 0.02, "medium_max": 0.12},
+  "batch_policy": {"reject_min_severity": "low"},
   "on_pass": "accept",
   "on_uncertain": "re_inspect",
   "on_defect": {"low": "rework", "medium": "rework", "high": "reject"},

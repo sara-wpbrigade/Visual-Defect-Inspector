@@ -8,9 +8,14 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from app.core.config import (
+    DEFAULT_MAX_AUDIO_BYTES,
+    DEFAULT_MAX_AUDIO_SECONDS,
     DEFAULT_MAX_TRANSCRIPT_CHARS,
     DEFAULT_REPORT_MAX_ATTEMPTS,
     DEFAULT_REPORT_TIMEOUT_SECONDS,
+    DEFAULT_WHISPER_COMPUTE_TYPE,
+    DEFAULT_WHISPER_DEVICE,
+    DEFAULT_WHISPER_MODEL,
     ReportWriterKind,
     Settings,
 )
@@ -89,6 +94,16 @@ def test_report_defaults_are_explicit() -> None:
     assert settings.report_timeout_seconds == DEFAULT_REPORT_TIMEOUT_SECONDS
     assert settings.report_max_attempts == DEFAULT_REPORT_MAX_ATTEMPTS
     assert settings.max_transcript_chars == DEFAULT_MAX_TRANSCRIPT_CHARS
+
+
+def test_audio_and_whisper_defaults_are_explicit() -> None:
+    """The voice-note tuning has stable documented defaults."""
+    settings = make_settings(report_writer=ReportWriterKind.TEMPLATE)
+    assert settings.max_audio_bytes == DEFAULT_MAX_AUDIO_BYTES
+    assert settings.max_audio_seconds == DEFAULT_MAX_AUDIO_SECONDS
+    assert settings.whisper_model == DEFAULT_WHISPER_MODEL
+    assert settings.whisper_device == DEFAULT_WHISPER_DEVICE
+    assert settings.whisper_compute_type == DEFAULT_WHISPER_COMPUTE_TYPE
 
 
 def test_factory_rejects_inconsistent_gemini_settings() -> None:

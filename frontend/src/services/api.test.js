@@ -6,7 +6,17 @@ import {
   NETWORK_ERROR_MESSAGE,
   UNEXPECTED_RESPONSE_MESSAGE,
 } from '../constants';
-import { ApiError, createInspection } from './api';
+import {
+  ApiError,
+  createInspection,
+  downloadPdfReport,
+  exportDefectLogCsv,
+  getBatch,
+  getBatches,
+  getCategories,
+  getInspection,
+  getInspections,
+} from './api';
 
 const photo = new File(['photo-bytes'], 'bottle.png', { type: 'image/png' });
 
@@ -100,8 +110,47 @@ function withContent(patch) {
   return withReport({ content: { ...API_PAYLOAD.report.content, ...patch } });
 }
 
+function fileResponse(status = 200, blob = new Blob(['file'])) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    blob: async () => blob,
+    json: async () => {
+      throw new SyntaxError('not JSON');
+    },
+  };
+}
+
+const HISTORY_ITEM = {
+  id: 'abc123',
+  created_at: '2026-11-20T10:00:00Z',
+  category: 'bottle',
+  batch_id: 'batch-1',
+  verdict: 'pass',
+  severity: 'none',
+  action: 'accept',
+  confidence: 0.95,
+  needs_review: false,
+  thumbnail_url: '/inspections/abc123/thumbnail',
+  batch_decision: 'Passed',
+  report_pdf_available: true,
+  report_pdf_url: '/inspections/abc123/report.pdf',
+};
+
+const BATCH_SUMMARY = {
+  batch_id: 'batch-1',
+  item_count: 2,
+  decision: 'Passed',
+  defect_count: 1,
+  pass_count: 1,
+  review_count: 0,
+  categories: ['bottle'],
+  last_inspection_at: '2026-11-20T10:00:00Z',
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('createInspection', () => {
@@ -138,6 +187,61 @@ describe('createInspection', () => {
     expect(result.report.manualReviewNotice).toContain('Review it manually');
     expect(result.report.content.defectType).toBeNull();
     expect(result.report.content.voiceNoteConflict).toContain('north edge');
+  });
+
+  it('maps an optional voice note and its transcript', async () => {
+    stubFetch(
+      jsonResponse(201, {
+        ...API_PAYLOAD,
+        voice_note: {
+          status: 'transcribed',
+          text: 'spots after the rain',
+          language: 'en',
+          duration_seconds: 2.5,
+          truncated: false,
+        },
+      }),
+    );
+
+    const result = await createInspection(photo);
+
+    expect(result.voiceNote).toEqual({
+      status: 'transcribed',
+      text: 'spots after the rain',
+      language: 'en',
+      durationSeconds: 2.5,
+      truncated: false,
+    });
+  });
+
+  it('rejects a malformed voice-note block', async () => {
+    stubFetch(
+      jsonResponse(201, {
+        ...API_PAYLOAD,
+        voice_note: {
+          status: 'unknown',
+          text: 'oops',
+          language: 'en',
+          duration_seconds: 1,
+          truncated: false,
+        },
+      }),
+    );
+
+    await expect(createInspection(photo)).rejects.toMatchObject({
+      message: UNEXPECTED_RESPONSE_MESSAGE,
+    });
+  });
+
+  it('shows the server detail when a voice note is unusable', async () => {
+    stubFetch(
+      jsonResponse(400, { detail: 'Unsupported audio format; use WAV, MP3, OGG, WebM or M4A.' }),
+    );
+
+    await expect(createInspection(photo)).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining('Unsupported audio'),
+    });
   });
 
   it('maps a bad image to an operator-friendly message', async () => {
@@ -269,5 +373,292 @@ describe('createInspection', () => {
     expect(error).toBeInstanceOf(Error);
     expect(error.status).toBe(0);
     expect(error.detail).toBeNull();
+  });
+});
+
+describe('getCategories', () => {
+  it('maps the category list to camelCase', async () => {
+    stubFetch(
+      jsonResponse(200, [
+        {
+          id: 'bottle',
+          display_name: 'Bottle',
+          description: 'A bottle',
+          defect_types: ['contamination'],
+        },
+      ]),
+    );
+
+    await expect(getCategories()).resolves.toEqual([
+      {
+        id: 'bottle',
+        displayName: 'Bottle',
+        description: 'A bottle',
+        defectTypes: ['contamination'],
+      },
+    ]);
+  });
+
+  it('falls back for a missing display name and defect list', async () => {
+    stubFetch(jsonResponse(200, [{ id: 'screw' }]));
+
+    await expect(getCategories()).resolves.toEqual([
+      { id: 'screw', displayName: 'screw', description: '', defectTypes: [] },
+    ]);
+  });
+
+  it('rejects a non-array body', async () => {
+    stubFetch(jsonResponse(200, { items: [] }));
+
+    await expect(getCategories()).rejects.toMatchObject({
+      message: UNEXPECTED_RESPONSE_MESSAGE,
+    });
+  });
+
+  it('maps network and HTTP failures', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('down')));
+    await expect(getCategories()).rejects.toMatchObject({
+      status: 0,
+      message: NETWORK_ERROR_MESSAGE,
+    });
+
+    stubFetch(jsonResponse(503, { detail: 'unavailable' }));
+    await expect(getCategories()).rejects.toMatchObject({ status: 503 });
+  });
+});
+
+describe('getBatches', () => {
+  it('maps batch summaries and sends paging parameters', async () => {
+    const fetchMock = stubFetch(jsonResponse(200, [BATCH_SUMMARY]));
+
+    await expect(getBatches({ limit: 5, offset: 10 })).resolves.toEqual([
+      {
+        batchId: 'batch-1',
+        itemCount: 2,
+        decision: 'Passed',
+        defectCount: 1,
+        passCount: 1,
+        reviewCount: 0,
+        categories: ['bottle'],
+        lastInspectionAt: '2026-11-20T10:00:00Z',
+      },
+    ]);
+    expect(fetchMock.mock.calls[0][0]).toBe('/batches?limit=5&offset=10');
+  });
+
+  it('tolerates a missing category list', async () => {
+    stubFetch(jsonResponse(200, [{ ...BATCH_SUMMARY, categories: undefined }]));
+
+    const [batch] = await getBatches();
+    expect(batch.categories).toEqual([]);
+  });
+
+  it('rejects a non-array body and network failures', async () => {
+    stubFetch(jsonResponse(200, {}));
+    await expect(getBatches()).rejects.toMatchObject({
+      message: UNEXPECTED_RESPONSE_MESSAGE,
+    });
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('down')));
+    await expect(getBatches()).rejects.toMatchObject({ status: 0 });
+  });
+});
+
+describe('getBatch', () => {
+  it('maps the summary and item rows', async () => {
+    stubFetch(
+      jsonResponse(200, {
+        summary: BATCH_SUMMARY,
+        items: [HISTORY_ITEM],
+      }),
+    );
+
+    const result = await getBatch('batch-1');
+
+    expect(result.summary).toMatchObject({
+      batchId: 'batch-1',
+      itemCount: 2,
+      passCount: 1,
+      reviewCount: 0,
+      categories: ['bottle'],
+      lastInspectionAt: '2026-11-20T10:00:00Z',
+    });
+    expect(result.items[0]).toMatchObject({
+      id: 'abc123',
+      verdict: 'pass',
+      reportPdfAvailable: true,
+    });
+  });
+
+  it('uses empty defaults for a partial summary', async () => {
+    stubFetch(jsonResponse(200, { summary: { batch_id: 'batch-2' }, items: null }));
+
+    const result = await getBatch('batch-2');
+
+    expect(result.summary.batchId).toBe('batch-2');
+    expect(result.summary.categories).toEqual([]);
+    expect(result.summary.lastInspectionAt).toBeUndefined();
+    expect(result.items).toEqual([]);
+  });
+
+  it('maps HTTP and network failures', async () => {
+    stubFetch(jsonResponse(404, { detail: 'Batch not found.' }));
+    await expect(getBatch('missing')).rejects.toMatchObject({ status: 404 });
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('down')));
+    await expect(getBatch('batch-1')).rejects.toMatchObject({ status: 0 });
+  });
+});
+
+describe('getInspections', () => {
+  it('maps history rows and appends filters', async () => {
+    const fetchMock = stubFetch(jsonResponse(200, { items: [HISTORY_ITEM], total: 7 }));
+
+    const result = await getInspections({
+      limit: 5,
+      offset: 10,
+      batchId: 'batch-1',
+      category: 'bottle',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/inspections?limit=5&offset=10&batch_id=batch-1&category=bottle',
+    );
+    expect(result.total).toBe(7);
+    expect(result.items[0]).toMatchObject({
+      id: 'abc123',
+      thumbnailUrl: '/inspections/abc123/thumbnail',
+      batchDecision: 'Passed',
+      reportPdfAvailable: true,
+    });
+  });
+
+  it('falls back to the item count and omits empty filters', async () => {
+    const fetchMock = stubFetch(jsonResponse(200, { items: [HISTORY_ITEM] }));
+
+    const result = await getInspections();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/inspections?limit=20&offset=0');
+    expect(result.total).toBe(1);
+  });
+
+  it('uses empty lists and derived URLs when rows are partial', async () => {
+    stubFetch(
+      jsonResponse(200, {
+        items: [{ inspection_id: 'def456', assessment: { verdict: 'defect' } }],
+      }),
+    );
+
+    const result = await getInspections();
+
+    expect(result.items[0]).toMatchObject({
+      id: 'def456',
+      verdict: 'defect',
+      thumbnailUrl: '/inspections/def456/thumbnail',
+      reportPdfAvailable: false,
+    });
+  });
+
+  it('maps HTTP and network failures', async () => {
+    stubFetch(jsonResponse(500, { detail: 'boom' }));
+    await expect(getInspections()).rejects.toMatchObject({ status: 500 });
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('down')));
+    await expect(getInspections()).rejects.toMatchObject({ status: 0 });
+  });
+});
+
+describe('getInspection', () => {
+  it('normalizes one stored inspection', async () => {
+    stubFetch(
+      jsonResponse(200, {
+        ...API_PAYLOAD,
+        inspection_id: 'abc123',
+        category: 'bottle',
+        created_at: '2026-11-20T10:00:00Z',
+        batch_id: 'batch-1',
+        batch_decision: 'Rejected',
+        report_pdf_available: true,
+        report_pdf_url: '/inspections/abc123/report.pdf',
+        images: {
+          photo: '/inspections/abc123/photo',
+          overlay: '/inspections/abc123/overlay',
+          thumbnail: '/inspections/abc123/thumbnail',
+        },
+      }),
+    );
+
+    const result = await getInspection('abc123');
+
+    expect(result).toMatchObject({
+      inspectionId: 'abc123',
+      category: 'bottle',
+      batchDecision: 'Rejected',
+      reportPdfAvailable: true,
+      images: {
+        photo: '/inspections/abc123/photo',
+        overlay: '/inspections/abc123/overlay',
+        thumbnail: '/inspections/abc123/thumbnail',
+      },
+    });
+  });
+
+  it('maps HTTP and network failures', async () => {
+    stubFetch(jsonResponse(404, { detail: 'not found' }));
+    await expect(getInspection('missing')).rejects.toMatchObject({ status: 404 });
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('down')));
+    await expect(getInspection('abc123')).rejects.toMatchObject({ status: 0 });
+  });
+});
+
+describe('downloadPdfReport', () => {
+  it('downloads the PDF and triggers a browser download', async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const fetchMock = stubFetch(fileResponse(200));
+
+    await downloadPdfReport('abc123');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/inspections/abc123/report.pdf');
+    expect(click).toHaveBeenCalledOnce();
+  });
+
+  it('maps HTTP and network failures', async () => {
+    stubFetch(fileResponse(404));
+    await expect(downloadPdfReport('missing')).rejects.toMatchObject({ status: 404 });
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('down')));
+    await expect(downloadPdfReport('abc123')).rejects.toMatchObject({ status: 0 });
+  });
+});
+
+describe('exportDefectLogCsv', () => {
+  it('downloads a CSV with the selected filters', async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const fetchMock = stubFetch(fileResponse(200, new Blob(['id\n'])));
+
+    await exportDefectLogCsv({ batchId: 'batch-1', category: 'bottle', onlyDefects: false });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/inspections/export.csv?batch_id=batch-1&category=bottle&only_defects=false',
+    );
+    expect(click).toHaveBeenCalledOnce();
+  });
+
+  it('uses only_defects by default', async () => {
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const fetchMock = stubFetch(fileResponse(200));
+
+    await exportDefectLogCsv();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/inspections/export.csv?only_defects=true');
+  });
+
+  it('maps HTTP and network failures', async () => {
+    stubFetch(fileResponse(500));
+    await expect(exportDefectLogCsv()).rejects.toMatchObject({ status: 500 });
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('down')));
+    await expect(exportDefectLogCsv()).rejects.toMatchObject({ status: 0 });
   });
 });
