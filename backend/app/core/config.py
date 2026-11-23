@@ -27,6 +27,12 @@ DEFAULT_REPORT_IMAGE_MAX_SIDE = 1024
 DEFAULT_REPORT_INCLUDE_IMAGE = True
 DEFAULT_REPORT_MAX_ATTEMPTS = 2
 DEFAULT_MAX_TRANSCRIPT_CHARS = 1000
+DEFAULT_GEMINI_VISION_VOTES = 1
+DEFAULT_GEMINI_VISION_TEMPERATURE = 0.0
+DEFAULT_GEMINI_VISION_ZOOM = False
+DEFAULT_GEMINI_VISION_VERIFY = False
+DEFAULT_GEMINI_VISION_MAX_SIDE = 1536
+DEFAULT_GEMINI_VISION_RETRIES = 3
 MILLISECONDS_PER_SECOND = 1000
 
 GEMINI_SETTING_NAMES = ("GEMINI_API_KEY", "GEMINI_MODEL")
@@ -37,6 +43,13 @@ class ReportWriterKind(StrEnum):
 
     GEMINI = "gemini"
     TEMPLATE = "template"
+
+
+class DetectorKind(StrEnum):
+    """Which anomaly detector implementation to use."""
+
+    PATCHCORE = "patchcore"
+    GEMINI = "gemini"
 
 
 class Settings(BaseSettings):
@@ -75,6 +88,16 @@ class Settings(BaseSettings):
     report_max_attempts: int = Field(default=DEFAULT_REPORT_MAX_ATTEMPTS, ge=1)
     max_transcript_chars: int = Field(default=DEFAULT_MAX_TRANSCRIPT_CHARS, gt=0)
 
+    detector: DetectorKind = DetectorKind.GEMINI
+    gemini_vision_votes: int = Field(default=DEFAULT_GEMINI_VISION_VOTES, ge=1)
+    gemini_vision_temperature: float = Field(
+        default=DEFAULT_GEMINI_VISION_TEMPERATURE, ge=0.0, le=2.0
+    )
+    gemini_vision_zoom: bool = DEFAULT_GEMINI_VISION_ZOOM
+    gemini_vision_verify: bool = DEFAULT_GEMINI_VISION_VERIFY
+    gemini_vision_max_side: int = Field(default=DEFAULT_GEMINI_VISION_MAX_SIDE, gt=0)
+    gemini_vision_retries: int = Field(default=DEFAULT_GEMINI_VISION_RETRIES, ge=0)
+
     def enabled_category_ids(self) -> list[str]:
         """Return the category ids named in the environment, or an empty list for all."""
         return [part.strip() for part in self.enabled_categories.split(",") if part.strip()]
@@ -82,7 +105,9 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def check_gemini_credentials(self) -> Self:
         """Require the Gemini key and model only when Gemini is selected."""
-        if self.report_writer is not ReportWriterKind.GEMINI:
+        needs_report = self.report_writer is ReportWriterKind.GEMINI
+        needs_detector = self.detector is DetectorKind.GEMINI
+        if not needs_report and not needs_detector:
             return self
         missing = [
             name
@@ -92,7 +117,13 @@ class Settings(BaseSettings):
             if value is None
         ]
         if missing:
-            raise ValueError(f"{', '.join(missing)} required when REPORT_WRITER=gemini")
+            if needs_report and needs_detector:
+                condition = "REPORT_WRITER=gemini or DETECTOR=gemini"
+            elif needs_report:
+                condition = "REPORT_WRITER=gemini"
+            else:
+                condition = "DETECTOR=gemini"
+            raise ValueError(f"{', '.join(missing)} required when {condition}")
         return self
 
 

@@ -7,7 +7,7 @@ import pytest
 from google import genai
 from pydantic import SecretStr
 
-from app.core.config import ReportWriterKind, Settings
+from app.core.config import DetectorKind, ReportWriterKind, Settings
 from app.models import patchcore, whisper_transcriber
 from app.models.factory import create_detector, create_report_writer, create_transcriber
 from app.models.gemini_writer import GeminiReportWriter
@@ -59,6 +59,7 @@ def test_create_transcriber_uses_the_whisper_settings(monkeypatch: pytest.Monkey
     monkeypatch.setattr(whisper_transcriber, "FasterWhisperTranscriber", TranscriberSpy)
     settings = Settings(
         report_writer=ReportWriterKind.TEMPLATE,
+        detector=DetectorKind.PATCHCORE,
         whisper_model="tiny",
         whisper_device="cpu",
         whisper_compute_type="int8",
@@ -70,7 +71,10 @@ def test_create_transcriber_uses_the_whisper_settings(monkeypatch: pytest.Monkey
 
 def test_create_writer_returns_the_offline_template() -> None:
     """The template choice never touches the Google SDK."""
-    settings = Settings(report_writer=ReportWriterKind.TEMPLATE)
+    settings = Settings(
+        report_writer=ReportWriterKind.TEMPLATE,
+        detector=DetectorKind.PATCHCORE,
+    )
     assert isinstance(create_report_writer(settings), TemplateReportWriter)
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +72,7 @@ class ImageEmbedder:
         self._device_name = device
         self._device: Any | None = None
         self._model: Any | None = None
+        self._load_lock = threading.Lock()
 
     def embed(self, image: Image.Image) -> np.ndarray:
         """Return the L2-normalised global-pooled embedding of *image*."""
@@ -85,19 +87,26 @@ class ImageEmbedder:
 
     def _loaded_model(self) -> Any:
         """Create the timm model once, on the shared device selection."""
-        if self._model is not None:
-            return self._model
-        import timm
+        cached = self._model
+        if cached is not None:
+            return cached
+        # Double-checked locking: concurrent first embeddings must not each
+        # create (and download) a backbone on the shared device.
+        with self._load_lock:
+            cached = self._model
+            if cached is not None:
+                return cached
+            import timm
 
-        from app.models.patchcore import resolve_device
+            from app.models.patchcore import resolve_device
 
-        self._device = resolve_device(self._device_name)
-        model = timm.create_model(BACKBONE_NAME, pretrained=True, num_classes=0)
-        model.eval()
-        model.to(self._device)
-        self._model = model
-        logger.info("Loaded category embedding backbone on %s", self._device)
-        return model
+            self._device = resolve_device(self._device_name)
+            model = timm.create_model(BACKBONE_NAME, pretrained=True, num_classes=0)
+            model.eval()
+            model.to(self._device)
+            self._model = model
+            logger.info("Loaded category embedding backbone on %s", self._device)
+            return model
 
 
 class EmbeddingCategoryClassifier(CategoryClassifier):
@@ -113,12 +122,16 @@ class EmbeddingCategoryClassifier(CategoryClassifier):
         self._catalog = catalog
         self._embedder = embedder or ImageEmbedder(device)
         self._prototypes: dict[str, np.ndarray] = {}
+        self._lock = threading.Lock()
 
     def similarity(self, image: Image.Image, category_id: str) -> float:
         """Return the cosine similarity to the chosen category's prototype."""
-        config = self._catalog.get(category_id)
-        prototype = self._prototype(config.prototype_path)
-        return cosine(self._embedder.embed(image), prototype)
+        # The shared timm backbone and device are not safe for concurrent
+        # inference, and the prototype cache is filled lazily below.
+        with self._lock:
+            config = self._catalog.get(category_id)
+            prototype = self._prototype(config.prototype_path)
+            return cosine(self._embedder.embed(image), prototype)
 
     def _prototype(self, path: Path) -> np.ndarray:
         """Load and cache the normalised mean embedding stored in an npz file."""

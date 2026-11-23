@@ -1,10 +1,10 @@
 {
-    "id": "bottle",
-    "display_name": "Bottle",
-    "description": "MVTec AD bottle category",
-    "checkpoint_path": "results/Patchcore/MVTecAD/bottle/v1/weights/lightning/model.ckpt",
-    "prototype_path": "results/prototypes/bottle.npz",
-    "min_similarity": 0.8,
-    "defect_types": ["broken part","contamination"],
-    "severity_bands": {"low_max":0.02,"medium_max":0.12}
-  }
+  "id": "bottle",
+  "display_name": "Bottle",
+  "description": "Glass or plastic bottle inspected from any angle or background",
+  "checkpoint_path": "results/Patchcore/MVTecAD/bottle/v1/weights/lightning/model.ckpt",
+  "prototype_path": "results/prototypes/bottle.npz",
+  "min_similarity": 0.8,
+  "defect_types": ["broken part", "crack", "contamination", "deformation"],
+  "severity_bands": {"low_max": 0.005, "medium_max": 0.04}
+}

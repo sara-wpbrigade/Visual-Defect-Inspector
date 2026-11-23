@@ -1,6 +1,7 @@
 """PatchCore detector: a trained Anomalib model loaded once per process."""
 
 import logging
+import threading
 from pathlib import Path
 from typing import cast
 
@@ -48,6 +49,7 @@ class PatchCoreDetector:
         )
         self._model.eval()
         self._model.to(self._device)
+        self._lock = threading.Lock()
         pre_processor = self._model.pre_processor
         post_processor = self._model.post_processor
         if pre_processor is None or post_processor is None:
@@ -63,17 +65,20 @@ class PatchCoreDetector:
 
     def detect(self, image: Image.Image) -> Detection:
         """Score one image and return its heatmap and flagged-pixel mask."""
-        batch = to_tensor(image).to(self._device).unsqueeze(0)
-        with torch.inference_mode():
-            prepared, _ = self._transform(batch, None)
-            predictions = self._post_processor(self._model.model(prepared))
-        score = predictions.pred_score
-        anomaly_map = predictions.anomaly_map
-        mask = predictions.pred_mask
-        if score is None or anomaly_map is None or mask is None:
-            raise RuntimeError("PatchCore returned an incomplete prediction.")
-        return Detection(
-            score=float(score[0]),
-            anomaly_map=anomaly_map[0].squeeze().cpu().numpy(),
-            mask=mask[0].squeeze().cpu().numpy().astype(bool),
-        )
+        # The loaded model and its device hold shared inference buffers, so this
+        # instance scores one image at a time even under concurrent requests.
+        with self._lock:
+            batch = to_tensor(image).to(self._device).unsqueeze(0)
+            with torch.inference_mode():
+                prepared, _ = self._transform(batch, None)
+                predictions = self._post_processor(self._model.model(prepared))
+            score = predictions.pred_score
+            anomaly_map = predictions.anomaly_map
+            mask = predictions.pred_mask
+            if score is None or anomaly_map is None or mask is None:
+                raise RuntimeError("PatchCore returned an incomplete prediction.")
+            return Detection(
+                score=float(score[0]),
+                anomaly_map=anomaly_map[0].squeeze().cpu().numpy(),
+                mask=mask[0].squeeze().cpu().numpy().astype(bool),
+            )

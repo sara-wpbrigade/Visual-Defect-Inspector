@@ -1,6 +1,6 @@
 """Dependencies shared by the API routes."""
 
-from functools import lru_cache
+import threading
 from typing import Annotated
 
 from fastapi import Depends
@@ -8,8 +8,7 @@ from fastapi import Depends
 from app.core.categories import CategoryCatalog, load_categories
 from app.core.config import Settings, get_settings
 from app.core.persona import PersonaConfig, load_persona
-from app.models.embedding_classifier import EmbeddingCategoryClassifier
-from app.models.factory import create_report_writer, create_transcriber
+from app.models.factory import create_category_classifier, create_report_writer, create_transcriber
 from app.models.registry import DetectorRegistry
 from app.models.report_writer import ReportWriter
 from app.models.template_writer import TemplateReportWriter
@@ -21,25 +20,62 @@ from app.services.repository import InspectionRepository, SqliteInspectionReposi
 from app.services.storage import ArtifactStore
 from app.services.voice import VoiceNoteService
 
+# These providers are process-wide singletons whose construction reads config or
+# loads models. A bare ``lru_cache`` does not stop two threads from building the
+# same provider twice, so each cache is filled once under an explicit lock.
+_CACHE_LOCK = threading.RLock()
+_category_catalog: CategoryCatalog | None = None
+_detector_registry: DetectorRegistry | None = None
+_persona: PersonaConfig | None = None
+_category_verifier: CategoryVerifier | None = None
+_transcriber: Transcriber | None = None
+_report_writer: ReportWriter | None = None
 
-@lru_cache
+
 def get_category_catalog() -> CategoryCatalog:
     """Load the enabled and available categories once per process."""
-    settings = get_settings()
-    return load_categories(settings.categories_dir, settings.enabled_category_ids())
+    global _category_catalog
+    cached = _category_catalog
+    if cached is not None:
+        return cached
+    with _CACHE_LOCK:
+        cached = _category_catalog
+        if cached is None:
+            settings = get_settings()
+            cached = load_categories(settings.categories_dir, settings.enabled_category_ids())
+            _category_catalog = cached
+        return cached
 
 
-@lru_cache
 def get_detector_registry() -> DetectorRegistry:
     """Return the lazy per-category detector registry."""
-    settings = get_settings()
-    return DetectorRegistry(get_category_catalog(), settings.detector_device)
+    global _detector_registry
+    cached = _detector_registry
+    if cached is not None:
+        return cached
+    with _CACHE_LOCK:
+        cached = _detector_registry
+        if cached is None:
+            settings = get_settings()
+            cached = DetectorRegistry(
+                get_category_catalog(), settings.detector_device, settings=settings
+            )
+            _detector_registry = cached
+        return cached
 
 
-@lru_cache
 def get_persona() -> PersonaConfig:
     """Return the configured persona, loading it once per process."""
-    return load_persona(get_settings().persona_name)
+    global _persona
+    cached = _persona
+    if cached is not None:
+        return cached
+    with _CACHE_LOCK:
+        cached = _persona
+        if cached is None:
+            cached = load_persona(get_settings().persona_name)
+            _persona = cached
+        return cached
 
 
 def get_inspection_service(
@@ -58,18 +94,35 @@ def get_persona_by_category() -> dict[str, PersonaConfig]:
     return {c.id: base.for_category(c) for c in catalog.all()}
 
 
-@lru_cache
 def get_category_verifier() -> CategoryVerifier:
-    """Return the yes/no category gate backed by the embedding classifier."""
-    catalog = get_category_catalog()
-    classifier = EmbeddingCategoryClassifier(catalog, device=get_settings().detector_device)
-    return CategoryVerifier(catalog, classifier)
+    """Return the yes/no category gate backed by the configured classifier."""
+    global _category_verifier
+    cached = _category_verifier
+    if cached is not None:
+        return cached
+    with _CACHE_LOCK:
+        cached = _category_verifier
+        if cached is None:
+            settings = get_settings()
+            catalog = get_category_catalog()
+            classifier = create_category_classifier(catalog, settings)
+            cached = CategoryVerifier(catalog, classifier)
+            _category_verifier = cached
+        return cached
 
 
-@lru_cache
 def get_transcriber() -> Transcriber:
     """Return the configured transcriber, loading the speech model once per process."""
-    return create_transcriber(get_settings())
+    global _transcriber
+    cached = _transcriber
+    if cached is not None:
+        return cached
+    with _CACHE_LOCK:
+        cached = _transcriber
+        if cached is None:
+            cached = create_transcriber(get_settings())
+            _transcriber = cached
+        return cached
 
 
 def get_voice_service(
@@ -79,10 +132,18 @@ def get_voice_service(
     return VoiceNoteService(get_transcriber, settings.max_transcript_chars)
 
 
-@lru_cache
 def get_report_writer() -> ReportWriter:
     """Return the configured report writer, building it once per process."""
-    return create_report_writer(get_settings())
+    global _report_writer
+    cached = _report_writer
+    if cached is not None:
+        return cached
+    with _CACHE_LOCK:
+        cached = _report_writer
+        if cached is None:
+            cached = create_report_writer(get_settings())
+            _report_writer = cached
+        return cached
 
 
 def get_report_service(

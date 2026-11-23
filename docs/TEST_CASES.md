@@ -681,4 +681,3 @@ _HTTP contract: POST, categories, batches, history, detail, PDF, CSV, errors, ma
 | maps HTTP and network failures                              |
 
 **Total frontend test cases: 148** (146 single `it` blocks + 2 `it.each` decision cases).
-

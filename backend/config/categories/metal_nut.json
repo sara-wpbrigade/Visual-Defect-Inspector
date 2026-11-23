@@ -1,10 +1,10 @@
 {
-    "id": "metal_nut",
-    "display_name": "Metal Nut",
-    "description": "MVTec AD metal nut category",
-    "checkpoint_path": "results/Patchcore/MVTecAD/metal_nut/v0/weights/lightning/model.ckpt",
-    "prototype_path": "results/prototypes/metal_nut.npz",
-    "min_similarity": 0.75,
-    "defect_types": ["bent","color","flip","scratch"],
-    "severity_bands": {"low_max":0.02,"medium_max":0.12}
-  }
+  "id": "metal_nut",
+  "display_name": "Metal Nut",
+  "description": "Threaded metal nut (hex or circular) inspected from any angle or background",
+  "checkpoint_path": "results/Patchcore/MVTecAD/metal_nut/v0/weights/lightning/model.ckpt",
+  "prototype_path": "results/prototypes/metal_nut.npz",
+  "min_similarity": 0.75,
+  "defect_types": ["crack", "thread damage", "bent", "scratch", "corrosion", "color"],
+  "severity_bands": {"low_max": 0.005, "medium_max": 0.04}
+}

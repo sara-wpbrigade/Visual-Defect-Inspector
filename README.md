@@ -348,6 +348,12 @@ cost.
   require a local LLM/Ollama writer; the template path is offline but not
   generative.
 
+### Concurrency & multi-user use
+
+- Run the backend with a **single Uvicorn worker** (`--workers 1`, the default).
+- **Gemini inspections and category checks** run concurrently across FastAPI's threadpool; **local PatchCore, embedding classifier, and faster-whisper inference** are serialized per model (one inference at a time per category/model).
+- There are **no user accounts**, so all users hitting the server share one inspection history and batch list stored in SQLite (WAL mode with `BEGIN IMMEDIATE` write retries).
+
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) — diagrams and component responsibilities

@@ -16,13 +16,14 @@ from app.core.config import (
     DEFAULT_WHISPER_COMPUTE_TYPE,
     DEFAULT_WHISPER_DEVICE,
     DEFAULT_WHISPER_MODEL,
+    DetectorKind,
     ReportWriterKind,
     Settings,
 )
 from app.models.factory import GEMINI_SETTINGS_ERROR, create_report_writer
 from app.models.template_writer import TemplateReportWriter
 
-GEMINI_ENV_VARS = ("GEMINI_API_KEY", "GEMINI_MODEL", "REPORT_WRITER")
+GEMINI_ENV_VARS = ("DETECTOR", "GEMINI_API_KEY", "GEMINI_MODEL", "REPORT_WRITER")
 
 
 @pytest.fixture(autouse=True)
@@ -40,8 +41,11 @@ def make_settings(**overrides: Any) -> Settings:
 
 
 def test_template_writer_needs_no_gemini_credentials() -> None:
-    """A fresh clone can run the template writer with no key."""
-    settings = make_settings(report_writer=ReportWriterKind.TEMPLATE)
+    """A fresh clone can run the offline detector and writer with no key."""
+    settings = make_settings(
+        report_writer=ReportWriterKind.TEMPLATE,
+        detector=DetectorKind.PATCHCORE,
+    )
     assert settings.gemini_api_key is None
     assert isinstance(create_report_writer(settings), TemplateReportWriter)
 
@@ -79,6 +83,19 @@ def test_gemini_writer_accepts_a_key_and_model() -> None:
     assert settings.gemini_model == "gemini-2.5-flash"
 
 
+def test_gemini_detector_requires_credentials_even_with_the_template_writer() -> None:
+    """A Gemini detector needs a key and model even when reports are offline."""
+    with pytest.raises(ValidationError) as error:
+        make_settings(
+            report_writer=ReportWriterKind.TEMPLATE,
+            detector=DetectorKind.GEMINI,
+        )
+    message = str(error.value)
+    assert "GEMINI_API_KEY" in message
+    assert "GEMINI_MODEL" in message
+    assert "DETECTOR=gemini" in message
+
+
 def test_empty_gemini_key_is_rejected() -> None:
     """A key that is present but blank is not a key."""
     with pytest.raises(ValidationError):
@@ -90,7 +107,10 @@ def test_empty_gemini_key_is_rejected() -> None:
 
 def test_report_defaults_are_explicit() -> None:
     """The offline report tuning has stable documented defaults."""
-    settings = make_settings(report_writer=ReportWriterKind.TEMPLATE)
+    settings = make_settings(
+        report_writer=ReportWriterKind.TEMPLATE,
+        detector=DetectorKind.PATCHCORE,
+    )
     assert settings.report_timeout_seconds == DEFAULT_REPORT_TIMEOUT_SECONDS
     assert settings.report_max_attempts == DEFAULT_REPORT_MAX_ATTEMPTS
     assert settings.max_transcript_chars == DEFAULT_MAX_TRANSCRIPT_CHARS
@@ -98,7 +118,10 @@ def test_report_defaults_are_explicit() -> None:
 
 def test_audio_and_whisper_defaults_are_explicit() -> None:
     """The voice-note tuning has stable documented defaults."""
-    settings = make_settings(report_writer=ReportWriterKind.TEMPLATE)
+    settings = make_settings(
+        report_writer=ReportWriterKind.TEMPLATE,
+        detector=DetectorKind.PATCHCORE,
+    )
     assert settings.max_audio_bytes == DEFAULT_MAX_AUDIO_BYTES
     assert settings.max_audio_seconds == DEFAULT_MAX_AUDIO_SECONDS
     assert settings.whisper_model == DEFAULT_WHISPER_MODEL

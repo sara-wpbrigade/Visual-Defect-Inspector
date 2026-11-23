@@ -2,11 +2,12 @@
 
 import logging
 import sqlite3
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -28,11 +29,16 @@ from app.services.storage import (
 logger = logging.getLogger(__name__)
 
 DATABASE_TIMEOUT_SECONDS = 5.0
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 0.05
+LOCKED_ERROR_FRAGMENT = "database is locked"
 # Schema version is now managed by migration module
 TIMESTAMP_PRECISION = "microseconds"
 RECORD_NOT_FOUND_MESSAGE = "The inspection was not found."
 CORRUPT_RECORD_MESSAGE = "A stored inspection record is corrupt."
 STORAGE_UNAVAILABLE_MESSAGE = "The inspection store is unavailable."
+
+T = TypeVar("T")
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS inspections (
@@ -207,62 +213,66 @@ class SqliteInspectionRepository:
         """
         from app.services.migration import initialize_schema
 
-        with self._connect() as connection:
-            initialize_schema(connection)
+        self._run(lambda connection: initialize_schema(connection))
 
     def add(self, record: InspectionRecord) -> None:
         """Insert one validated record, keeping its JSON form for later reads."""
         validate_inspection_id(record.id)
         assessment = record.assessment
         location = assessment.location
-        with self._connect() as connection:
-            connection.execute(
-                INSERT_SQL,
-                (
-                    record.id,
-                    _format_timestamp(record.created_at),
-                    record.persona,
-                    record.batch_id,
-                    record.category,
-                    assessment.verdict.value,
-                    assessment.severity.value,
-                    assessment.action.value,
-                    assessment.confidence,
-                    int(assessment.needs_review),
-                    record.score,
-                    assessment.area_ratio,
-                    location.region if location is not None else None,
-                    record.report.content.defect_type,
-                    record.report_pdf_path,
-                    record.model_dump_json(),
-                ),
-            )
+        values = (
+            record.id,
+            _format_timestamp(record.created_at),
+            record.persona,
+            record.batch_id,
+            record.category,
+            assessment.verdict.value,
+            assessment.severity.value,
+            assessment.action.value,
+            assessment.confidence,
+            int(assessment.needs_review),
+            record.score,
+            assessment.area_ratio,
+            location.region if location is not None else None,
+            record.report.content.defect_type,
+            record.report_pdf_path,
+            record.model_dump_json(),
+        )
+        self._run(
+            lambda connection: connection.execute(INSERT_SQL, values),
+            write=True,
+        )
 
     def set_report_pdf_path(self, inspection_id: str, name: str | None) -> None:
         """Set the report_pdf_path file name for an inspection."""
         validate_inspection_id(inspection_id)
-        with self._connect() as connection:
-            connection.execute(UPDATE_PDF_PATH_SQL, (name, inspection_id))
+        self._run(
+            lambda connection: connection.execute(UPDATE_PDF_PATH_SQL, (name, inspection_id)),
+            write=True,
+        )
 
     def get(self, inspection_id: str) -> InspectionRecord | None:
         """Return one record, or None when the id is unknown."""
         validate_inspection_id(inspection_id)
-        with self._connect() as connection:
-            row = connection.execute(SELECT_RECORD_SQL, (inspection_id,)).fetchone()
+        row = self._run(
+            lambda connection: connection.execute(SELECT_RECORD_SQL, (inspection_id,)).fetchone()
+        )
         if row is None:
             return None
         return _parse_record(row[0], row[1])
 
     def items_in_batch(self, batch_id: str) -> list[InspectionRecord]:
         """Return all items belonging to a batch, ordered by creation time."""
-        with self._connect() as connection:
-            rows = connection.execute(SELECT_BATCH_ITEMS_SQL, (batch_id,)).fetchall()
+        rows = self._run(
+            lambda connection: connection.execute(SELECT_BATCH_ITEMS_SQL, (batch_id,)).fetchall()
+        )
         return [_parse_record(row[0], row[1]) for row in rows]
 
     def list_batches(self, limit: int, offset: int) -> list[str]:
         """Return newest unique batch ids."""
-        with self._connect() as connection:
-            rows = connection.execute(SELECT_BATCH_IDS_SQL, (limit, offset)).fetchall()
+        rows = self._run(
+            lambda connection: connection.execute(SELECT_BATCH_IDS_SQL, (limit, offset)).fetchall()
+        )
         return [row[0] for row in rows]
 
     def list(
@@ -275,31 +285,73 @@ class SqliteInspectionRepository:
         """Return the newest records first, optionally filtered."""
         where, filters = _filters(batch_id, category)
         query = f"{SELECT_SUMMARIES_SQL}{where} ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        with self._connect() as connection:
-            rows = connection.execute(query, (*filters, limit, offset)).fetchall()
+        rows = self._run(
+            lambda connection: connection.execute(query, (*filters, limit, offset)).fetchall()
+        )
         return [_parse_record(row[4], row[3]) for row in rows]
 
     def count(self, batch_id: str | None = None, category: str | None = None) -> int:
         """Return how many records exist, optionally filtered."""
         where, filters = _filters(batch_id, category)
-        with self._connect() as connection:
-            row = connection.execute(f"{COUNT_SQL}{where}", filters).fetchone()
+        row = self._run(
+            lambda connection: connection.execute(f"{COUNT_SQL}{where}", filters).fetchone()
+        )
         return int(row[0])
 
+    def _run(self, operation: Callable[[sqlite3.Connection], T], *, write: bool = False) -> T:
+        """Run one operation on a private connection, retrying brief locks."""
+        for attempt in range(1, RETRY_ATTEMPTS + 1):
+            try:
+                with self._connect(write=write) as connection:
+                    return operation(connection)
+            except sqlite3.OperationalError as exc:
+                if attempt == RETRY_ATTEMPTS or not _is_locked(exc):
+                    logger.exception("A SQLite operation failed")
+                    raise StorageError(STORAGE_UNAVAILABLE_MESSAGE) from exc
+                logger.warning(
+                    "The SQLite database is locked; retrying (%d/%d).",
+                    attempt,
+                    RETRY_ATTEMPTS,
+                )
+                time.sleep(RETRY_BACKOFF_SECONDS * attempt)
+            except sqlite3.Error as exc:
+                logger.exception("A SQLite operation failed")
+                raise StorageError(STORAGE_UNAVAILABLE_MESSAGE) from exc
+        raise AssertionError("unreachable")
+
     @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
-        """Open one connection for one operation, always closing it."""
-        connection = sqlite3.connect(self._database_path, timeout=DATABASE_TIMEOUT_SECONDS)
+    def _connect(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+        """Open one connection for one operation, always closing it.
+
+        A connection is never shared between threads. Writes take SQLite's write
+        lock up front with ``BEGIN IMMEDIATE`` so competing writers queue on the
+        busy timeout instead of failing a lock upgrade mid-transaction.
+        """
+        connection = sqlite3.connect(
+            self._database_path,
+            timeout=DATABASE_TIMEOUT_SECONDS,
+            isolation_level=None if write else "DEFERRED",
+        )
         try:
             connection.execute("PRAGMA journal_mode=WAL")
+            if write:
+                connection.execute("BEGIN IMMEDIATE")
             yield connection
-            connection.commit()
-        except sqlite3.Error as exc:
-            connection.rollback()
-            logger.exception("A SQLite operation failed")
-            raise StorageError(STORAGE_UNAVAILABLE_MESSAGE) from exc
+            if write:
+                connection.execute("COMMIT")
+            else:
+                connection.commit()
+        except BaseException:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
         finally:
             connection.close()
+
+
+def _is_locked(exc: sqlite3.OperationalError) -> bool:
+    """Return True when SQLite reports that another connection holds the lock."""
+    return LOCKED_ERROR_FRAGMENT in str(exc).lower()
 
 
 def _filters(batch_id: str | None, category: str | None) -> tuple[str, list[str]]:

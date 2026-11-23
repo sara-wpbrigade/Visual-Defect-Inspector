@@ -81,8 +81,8 @@
   --duration-med: 200ms;
 
   /* Layout */
-  --max-page: 1180px;
-  --gutter: clamp(16px, 4vw, 40px);
+  --max-page: 1480px;
+  --gutter: clamp(12px, 2vw, 24px);
   --header-height: 60px;
 
   --font-sans:
