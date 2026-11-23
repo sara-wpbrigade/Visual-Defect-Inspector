@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1020" viewBox="0 0 1500 1020" role="img" aria-labelledby="title desc">
   <title id="title">Visual Defect Inspector — whole system architecture</title>
-  <desc id="desc">Browser, FastAPI backend, AI model layer, SQLite and artifact storage, with the request and report paths.</desc>
+  <desc id="desc">Browser, FastAPI backend, Gemini-first AI model layer with PatchCore fallback, thread-safe model access, SQLite and artifact storage, with the request and report paths.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#576460" />
@@ -32,7 +32,7 @@
   <rect class="bg" width="1500" height="1020" rx="18" />
 
   <text class="title" x="40" y="52">Visual Defect Inspector — whole system</text>
-  <text class="subtitle" x="40" y="78">Photo → category gate → PatchCore → rule-based facts → AI/offline report → SQLite + PDF + CSV</text>
+  <text class="subtitle" x="40" y="78">Photo → category gate → Gemini (PatchCore fallback) → rule-based facts → AI/offline report → SQLite + PDF + CSV</text>
 
   <!-- Browser column -->
   <rect class="column" x="40" y="100" width="390" height="820" rx="16" />
@@ -84,7 +84,7 @@
 
   <rect class="box" x="490" y="278" width="500" height="60" rx="10" />
   <text class="box-title" x="506" y="302">Dependencies</text>
-  <text class="box-text" x="506" y="322">catalog · detector registry · persona · verifier · voice · report · repository · store</text>
+  <text class="box-text" x="506" y="322">catalog · detector registry · classifier · persona · voice · report · repository · store</text>
 
   <rect class="box" x="490" y="356" width="158" height="96" rx="10" />
   <text class="box-title" x="504" y="380">InspectionService</text>
@@ -106,22 +106,22 @@
 
   <rect class="box" x="490" y="472" width="150" height="74" rx="10" />
   <text class="box-title" x="504" y="496">Rules</text>
-  <text class="box-text" x="504" y="516">verdict · confidence ·</text>
-  <text class="box-text" x="504" y="534">severity · location · action</text>
+  <text class="small" x="504" y="516">verdict · confidence ·</text>
+  <text class="small" x="504" y="534">severity · location · action</text>
 
-  <rect class="box" x="652" y="472" width="150" height="74" rx="10" />
-  <text class="box-title" x="666" y="496">CategoryVerifier</text>
-  <text class="box-text" x="666" y="516">cosine similarity vs</text>
-  <text class="box-text" x="666" y="534">category prototype</text>
+  <rect class="box" x="652" y="472" width="180" height="74" rx="10" />
+  <text class="box-title" x="666" y="496">Category gate</text>
+  <text class="small" x="666" y="516">GeminiCategoryClassifier</text>
+  <text class="small" x="666" y="534">EmbeddingCategoryClassifier</text>
 
-  <rect class="box" x="814" y="472" width="176" height="74" rx="10" />
-  <text class="box-title" x="828" y="496">Batch service</text>
-  <text class="box-text" x="828" y="516">batch policy · decision</text>
-  <text class="box-text" x="828" y="534">counts · summary</text>
+  <rect class="box" x="844" y="472" width="146" height="74" rx="10" />
+  <text class="box-title" x="858" y="496">Batch service</text>
+  <text class="box-text" x="858" y="516">batch policy · counts</text>
+  <text class="box-text" x="858" y="534">decision · summary</text>
 
   <rect class="box" x="490" y="566" width="160" height="86" rx="10" />
   <text class="box-title" x="504" y="590">Repository</text>
-  <text class="box-text" x="504" y="610">SQLite, parameterized</text>
+  <text class="box-text" x="504" y="610">SQLite WAL · prepared</text>
   <text class="box-text" x="504" y="628">records, filters, paging</text>
 
   <rect class="box" x="662" y="566" width="160" height="86" rx="10" />
@@ -143,8 +143,8 @@
   <rect class="box-green" x="490" y="790" width="500" height="92" rx="10" />
   <text class="box-title" x="506" y="814">Lifespan</text>
   <text class="box-text" x="506" y="834">create/migrate the SQLite schema once before serving requests;</text>
-  <text class="box-text" x="506" y="852">the PatchCore checkpoint and Whisper model load lazily on first use.</text>
-  <text class="box-text" x="506" y="870">One model per process is shared by all requests (demo scale).</text>
+  <text class="box-text" x="506" y="852">detectors (Gemini default, PatchCore fallback) and Whisper load lazily;</text>
+  <text class="box-text" x="506" y="870">shared model instances are guarded by per-model locks.</text>
 
   <!-- AI and storage column -->
   <rect class="column" x="1040" y="100" width="420" height="820" rx="16" />
@@ -152,44 +152,46 @@
   <rect class="header-amber" x="1040" y="132" width="420" height="16" />
   <text class="column-title" x="1062" y="131">AI / model layer + storage</text>
 
-  <rect class="box-red" x="1064" y="174" width="372" height="86" rx="10" />
-  <text class="box-title" x="1080" y="198">PatchCore · Anomalib · local</text>
-  <text class="box-text" x="1080" y="218">one checkpoint per category; scores an image,</text>
-  <text class="box-text" x="1080" y="236">returns anomaly map + binary mask; MPS/CUDA/CPU</text>
+  <rect class="box-red" x="1064" y="174" width="372" height="104" rx="10" />
+  <text class="box-title" x="1080" y="198">DetectorRegistry · thread-safe</text>
+  <text class="box-text" x="1080" y="218">double-checked lock → one detector per process</text>
+  <text class="box-text" x="1080" y="236">GeminiDetector · default, concurrent</text>
+  <text class="box-text" x="1080" y="254">optional zoom + close-up box refinement</text>
+  <text class="box-text" x="1080" y="272">PatchCoreDetector · .ckpt, per-model lock</text>
 
-  <rect class="box" x="1064" y="278" width="372" height="76" rx="10" />
-  <text class="box-title" x="1080" y="302">Category gate · timm embedding</text>
-  <text class="box-text" x="1080" y="322">wide_resnet50_2.racm_in1k · L2-normalised mean</text>
-  <text class="box-text" x="1080" y="340">prototype per category · cosine cutoff</text>
+  <rect class="box" x="1064" y="296" width="372" height="76" rx="10" />
+  <text class="box-title" x="1080" y="320">Category gate · classifier</text>
+  <text class="small" x="1080" y="340">GeminiCategoryClassifier · default, DETECTOR=gemini</text>
+  <text class="small" x="1080" y="358">EmbeddingCategoryClassifier · .npz, DETECTOR=patchcore</text>
 
-  <rect class="box" x="1064" y="372" width="372" height="76" rx="10" />
-  <text class="box-title" x="1080" y="396">faster-whisper · local</text>
-  <text class="box-text" x="1080" y="416">CPU int8 · VAD · lazy load · model base by default</text>
-  <text class="box-text" x="1080" y="434">silent audio never reaches the model</text>
+  <rect class="box" x="1064" y="390" width="372" height="76" rx="10" />
+  <text class="box-title" x="1080" y="414">FasterWhisperTranscriber · local</text>
+  <text class="box-text" x="1080" y="434">CPU int8 · VAD · per-model lock · lazy load</text>
+  <text class="box-text" x="1080" y="452">silent audio never reaches the model</text>
 
-  <rect class="box" x="1064" y="466" width="372" height="74" rx="10" />
-  <text class="box-title" x="1080" y="490">Gemini report writer · optional</text>
-  <text class="box-text" x="1080" y="510">facts + downscaled photo + sanitized transcript</text>
-  <text class="box-text" x="1080" y="528">JSON schema · prompt injection guard</text>
+  <rect class="box" x="1064" y="484" width="372" height="74" rx="10" />
+  <text class="box-title" x="1080" y="508">GeminiReportWriter · default</text>
+  <text class="box-text" x="1080" y="528">facts + downscaled photo + sanitized transcript</text>
+  <text class="box-text" x="1080" y="546">JSON schema · prompt injection guard</text>
 
-  <rect class="box" x="1064" y="558" width="372" height="74" rx="10" />
-  <text class="box-title" x="1080" y="582">Template report writer · offline</text>
-  <text class="box-text" x="1080" y="602">deterministic wording from the same fact strings</text>
-  <text class="box-text" x="1080" y="620">always available fallback, no key or network</text>
+  <rect class="box" x="1064" y="576" width="372" height="74" rx="10" />
+  <text class="box-title" x="1080" y="600">TemplateReportWriter · offline</text>
+  <text class="box-text" x="1080" y="620">deterministic wording from the same fact strings</text>
+  <text class="box-text" x="1080" y="638">always available fallback, no key or network</text>
 
-  <rect class="box-green" x="1064" y="660" width="372" height="76" rx="10" />
-  <text class="box-title" x="1080" y="684">SQLite · reports + history</text>
-  <text class="box-text" x="1080" y="704">inspections table: indexed columns + full record JSON,</text>
-  <text class="box-text" x="1080" y="722">report_pdf_path, user_version migrations</text>
+  <rect class="box-green" x="1064" y="668" width="372" height="76" rx="10" />
+  <text class="box-title" x="1080" y="692">SQLite · reports + history</text>
+  <text class="box-text" x="1080" y="712">WAL mode · BEGIN IMMEDIATE retries</text>
+  <text class="box-text" x="1080" y="730">indexed columns · record JSON · migrations</text>
 
-  <rect class="box-green" x="1064" y="754" width="372" height="92" rx="10" />
-  <text class="box-title" x="1080" y="778">Artifact files · backend/data/uploads</text>
-  <text class="box-text" x="1080" y="798">{id}.png · {id}_overlay.png · {id}_thumb.jpg</text>
-  <text class="box-text" x="1080" y="816">{id}_report.pdf · random 32-hex id · zip-safe names</text>
-  <text class="box-text" x="1080" y="834">audio is never stored; only the transcript is kept</text>
+  <rect class="box-green" x="1064" y="762" width="372" height="92" rx="10" />
+  <text class="box-title" x="1080" y="786">Artifact files · backend/data/uploads</text>
+  <text class="box-text" x="1080" y="806">{id}.png · {id}_overlay.png · {id}_thumb.jpg</text>
+  <text class="box-text" x="1080" y="824">{id}_report.pdf · random 32-hex id · zip-safe names</text>
+  <text class="box-text" x="1080" y="842">audio is never stored; only the transcript is kept</text>
 
-  <rect class="box-amber" x="1064" y="864" width="372" height="40" rx="10" />
-  <text class="note" x="1080" y="889">Code decides the facts. The LLM only words them.</text>
+  <rect class="box-amber" x="1064" y="872" width="372" height="40" rx="10" />
+  <text class="note" x="1080" y="897">Code decides the facts. The LLM only words them.</text>
 
   <!-- Arrows -->
   <path class="arrow" d="M 406 569 L 486 569" />
@@ -205,16 +207,16 @@
   <path class="arrow" d="M 569 452 L 569 468" />
 
   <!-- Model calls: the service layer owns these calls; the AI column names the implementations. -->
-  <path class="arrow" d="M 990 430 L 1042 430 L 1042 500 L 1064 500" />
+  <path class="arrow" d="M 990 430 L 1042 430 L 1042 521 L 1064 521" />
   <text class="small" x="1016" y="424">word facts</text>
   <path class="arrow" d="M 990 216 L 1064 216" />
   <text class="small" x="992" y="206">image</text>
-  <path class="arrow-dash" d="M 990 440 L 1018 440 L 1018 595 L 1064 595" />
-  <text class="small" x="1020" y="588">fallback</text>
+  <path class="arrow-dash" d="M 990 440 L 1018 440 L 1018 613 L 1064 613" />
+  <text class="small" x="1020" y="606">fallback</text>
 
   <!-- Persistence and artifacts -->
-  <path class="arrow" d="M 650 652 L 650 662 L 1000 662 L 1000 690 L 1064 690" />
-  <path class="arrow" d="M 910 652 L 910 666 L 1032 666 L 1032 800 L 1064 800" />
+  <path class="arrow" d="M 650 652 L 650 662 L 1100 662 L 1100 668" />
+  <path class="arrow" d="M 910 652 L 910 670 L 1032 670 L 1032 808 L 1064 808" />
   <text class="small" x="940" y="656">store</text>
 
   <!-- Bottom legend -->

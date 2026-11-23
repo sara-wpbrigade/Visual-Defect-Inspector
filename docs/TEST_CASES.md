@@ -4,7 +4,7 @@ This file is the factual inventory of the automated tests. It is generated from 
 
 ## How to read this
 
-- **Backend**: one function per `test_*` entry. Parametrized functions execute once per parameter set; the repository reports **255 executed tests from 204 functions**.
+- **Backend**: one function per `test_*` entry. Parametrized functions execute once per parameter set; the repository reports **267 executed tests from 216 functions**.
 - **Frontend**: one `it(...)` title per test. `npm test` reports **148 tests** across 16 test files.
 - Every backend test mocks the model or uses a dependency override; no test calls Gemini, Torch inference or Whisper.
 - Coverage: backend **87%** overall; frontend **93.8% statements / 85.7% branches**.
@@ -16,9 +16,11 @@ This file is the factual inventory of the automated tests. It is generated from 
 | `test_audio.py`              | Tests for voice note validation and decoding.                      | 11             |
 | `test_batch.py`              | Tests for pure batch decision and summary logic.                   | 5              |
 | `test_batches_api.py`        | Tests for the /batches API routes.                                 | 2              |
-| `test_config.py`             | Tests for settings validation and report-writer selection.         | 8              |
+| `test_concurrency.py`        | Concurrency tests for simultaneous API inspections, lazy loading, and SQLite retries. | 4 |
+| `test_config.py`             | Tests for settings validation and report-writer selection.         | 9              |
 | `test_export_csv.py`         | Tests for CSV defect log export and formula injection defense.     | 3              |
 | `test_factory.py`            | Tests for detector and report-writer construction.                 | 4              |
+| `test_gemini_detector.py`    | Offline unit tests for the Gemini vision detector, category classifier, and factory.  | 7 |
 | `test_gemini_writer.py`      | Tests for the Gemini report writer with an injected fake client.   | 6              |
 | `test_health.py`             | Tests for the health endpoint.                                     | 1              |
 | `test_images.py`             | Tests for upload validation.                                       | 12             |
@@ -36,7 +38,7 @@ This file is the factual inventory of the automated tests. It is generated from 
 | `test_transcript.py`         | Tests for transcript cleaning and the prompt-injection guard.      | 7              |
 | `test_voice_service.py`      | Tests for the voice note service with a stubbed transcriber.       | 7              |
 
-**Total backend test functions: 204.**
+**Total backend test functions: 216.**
 
 ## Backend test cases, file by file
 
@@ -93,6 +95,18 @@ _Tests for settings validation and report-writer selection._
 | `test_report_defaults_are_explicit`                 | The offline report tuning has stable documented defaults.                   |
 | `test_audio_and_whisper_defaults_are_explicit`      | The voice-note tuning has stable documented defaults.                       |
 | `test_factory_rejects_inconsistent_gemini_settings` | Bypassed validation still cannot build a Gemini writer without credentials. |
+| `test_gemini_detector_requires_credentials_even_with_the_template_writer` | Selecting `DETECTOR=gemini` requires both credentials even when `REPORT_WRITER=template`. |
+
+### `test_concurrency.py`
+
+_Concurrency tests for simultaneous API inspections, lazy loading, and SQLite retries._
+
+| Test                                                                    | Asserts                                                                                  |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `test_concurrent_inspections_keep_scores_isolated_and_persist_all`      | 12 simultaneous `POST /inspections` return 201 with isolated scores, history, batch, CSV. |
+| `test_registry_loads_category_detector_once_under_concurrency`          | Concurrent first `DetectorRegistry.get` calls invoke the factory exactly once.           |
+| `test_repository_retries_database_locked_then_succeeds`                 | Transient `database is locked` errors are retried until the write succeeds.              |
+| `test_repository_raises_storage_error_after_exhausting_lock_retries`    | Persistent `database is locked` errors raise `StorageError` after 3 attempts.            |
 
 ### `test_export_csv.py`
 
@@ -114,6 +128,20 @@ _Tests for detector and report-writer construction._
 | `test_create_transcriber_uses_the_whisper_settings`   | The transcriber is built from the configured model, device and precision.    |
 | `test_create_writer_returns_the_offline_template`     | The template choice never touches the Google SDK.                            |
 | `test_create_writer_builds_a_gemini_client`           | Gemini settings become a client with the configured timeout in milliseconds. |
+
+### `test_gemini_detector.py`
+
+_Offline unit tests for the Gemini vision detector, category classifier, and factory wiring._
+
+| Test                                                                 | Asserts                                                                            |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `test_pass_verdict_scores_low_and_returns_an_empty_map`              | A pass returns a low score, empty boolean mask, and zero `float32` anomaly map.    |
+| `test_defect_verdict_paints_the_box_on_the_mask_and_anomaly_map`     | A defect scores high and paints `box_2d` into the mask and anomaly map.            |
+| `test_retries_a_503_and_succeeds_on_the_next_attempt`                | A retryable 503 `APIError` is retried and succeeds on the next attempt.            |
+| `test_create_detector_builds_gemini_without_a_checkpoint`            | Gemini mode ignores the `.ckpt` path and configures `genai.Client`.                |
+| `test_registry_passes_settings_and_category_without_a_checkpoint`    | `DetectorRegistry` passes settings and category config in Gemini mode.             |
+| `test_category_classifier_accepts_matching_part_and_rejects_mismatch` | Matching parts clear `min_similarity`; mismatched parts return `0.0`.             |
+| `test_create_category_classifier_builds_gemini_when_configured`      | `create_category_classifier` returns `GeminiCategoryClassifier` when `DETECTOR=gemini`. |
 
 ### `test_gemini_writer.py`
 

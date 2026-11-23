@@ -5,9 +5,10 @@ item, get a pass/defect decision with evidence and a recommended action, keep an
 inspection history, add an optional voice note, and download an AI-written PDF
 report.
 
-Built with **FastAPI + Python 3.12**, **React 19 + Vite 8**, **Anomalib
-PatchCore** (local vision), **faster-whisper** (local speech), **Gemini**
-(report wording, optional) and **SQLite**.
+Built with **FastAPI + Python 3.12**, **React 19 + Vite 8**, **Gemini Vision**
+(default defect detection, category gate, and optional report wording),
+**Anomalib PatchCore** (optional local vision fallback), **faster-whisper**
+(local speech), and **SQLite**.
 
 > **Core principle:** the detector and rules own the facts (verdict,
 > confidence, severity, area, location, action). The LLM only words validated
@@ -36,7 +37,7 @@ PatchCore** (local vision), **faster-whisper** (local speech), **Gemini**
 | SOW requirement                     | Implementation                                                                    |
 | ----------------------------------- | --------------------------------------------------------------------------------- |
 | Photo upload or browser camera      | `UploadPanel` file picker, drag-and-drop and `capture="environment"` camera input |
-| Pass/defect verdict with confidence | PatchCore score + persona cutoff + `rules.compute_confidence`                     |
+| Pass/defect verdict with confidence | Gemini vision / PatchCore score + persona cutoff + `rules.compute_confidence`                   |
 | Defect location                     | Binary mask → 3×3 grid cell + normalized bounding box + red overlay               |
 | Defect type and severity            | Severity from flagged area; defect type is an AI estimate from the photo          |
 | Recommended action                  | Persona action table: accept / rework / reject / re-inspect                       |
@@ -45,7 +46,7 @@ PatchCore** (local vision), **faster-whisper** (local speech), **Gemini**
 | PDF inspection report               | ReportLab report with facts, photos, transcript, review banner and AI wording     |
 | Batch decision + CSV                | Batch policy over inspections + CSV defect log export                             |
 | Multi-category                      | Bottle, metal nut and screw configs; lazy detector per category                   |
-| Local models                        | PatchCore and faster-whisper run locally; Gemini is optional                      |
+| Local / API models                  | Gemini vision is default (`DETECTOR=gemini`); local PatchCore and faster-whisper supported |
 
 ## Quick start with Docker
 
@@ -55,15 +56,17 @@ Prerequisites: Docker Desktop (or Docker Engine + Compose).
 # 1. Create the runtime environment file.
 cp backend/.env.example backend/.env
 
-# 2a. Use Gemini for report wording: edit backend/.env with a real key.
+# 2a. Default Gemini mode (vision + report wording): edit backend/.env with a real key.
 #     GEMINI_API_KEY=...
 #     GEMINI_MODEL=gemini-2.5-flash
-#     REPORT_WRITER=gemini
+#     DETECTOR=gemini
+#     REPORT_WRITER=gemini   # or template to save an extra API call per photo
 
-# 2b. OR use the offline template writer, no key needed:
+# 2b. OR fully offline local mode (requires PatchCore checkpoints + prototypes):
+#     DETECTOR=patchcore
 #     REPORT_WRITER=template
 
-# 3. The detector checkpoints must exist on the host first.
+# 3. Only if using DETECTOR=patchcore: place checkpoints/prototypes in backend/results.
 #    See docs/MODELS.md for Git LFS / release / training options.
 
 # 4. Build and start both containers.
@@ -174,10 +177,10 @@ Browser (React)
 
 1. Validate the real image bytes, byte/pixel limits and category id.
 2. Validate and decode the optional audio; enforce 5 MB and 60 s.
-3. Run the category gate (embedding similarity vs the category prototype).
+3. Run the category gate (`GeminiCategoryClassifier` by default, or embedding similarity when `DETECTOR=patchcore`).
 4. Transcribe the voice note if present; a silent note returns `no_speech` and
    never loads the model.
-5. Run the category's PatchCore detector.
+5. Run the category's detector (`GeminiDetector` by default with optional zoom & close-up refinement, or PatchCore when `DETECTOR=patchcore`).
 6. Apply the persona rules: verdict, confidence, severity, area, location,
    action and `needs_review`.
 7. Build report facts, word them with Gemini or the template writer, validate
@@ -212,10 +215,8 @@ running.
 
 ## AI pipeline
 
-1. **Category gate** — `wide_resnet50_2.racm_in1k` timm embedding, compared by
-   cosine similarity to a per-category prototype with `min_similarity`.
-2. **Anomaly detection** — local PatchCore checkpoint per category returns a
-   score, an anomaly map and a binary mask.
+1. **Category gate** — `GeminiCategoryClassifier` (default) verifies the uploaded part matches the chosen category regardless of real-world background; when `DETECTOR=patchcore`, falls back to `wide_resnet50_2.racm_in1k` cosine similarity vs `.npz` prototypes.
+2. **Anomaly detection** — `GeminiDetector` (default) returns observations, normalized `box_2d` regions (with optional part zoom and close-up verification), a confidence-based score, anomaly map, and binary mask; `DETECTOR=patchcore` runs local PatchCore checkpoints.
 3. **Rules** — area ratio, severity bands, cutoff/review margin, 3×3 location,
    action table.
 4. **Report facts** — a code-built `ReportFacts` object with preformatted
@@ -259,8 +260,15 @@ Copy `backend/.env.example` to `backend/.env`. Important values:
 | `MAX_AUDIO_BYTES`      | `5242880`             | Voice note byte cap              |
 | `MAX_AUDIO_SECONDS`    | `60`                  | Voice note duration cap          |
 | `MAX_TRANSCRIPT_CHARS` | `1000`                | Transcript cap before the prompt |
+| `DETECTOR`             | `gemini`              | `gemini` or`patchcore`           |
+| `GEMINI_VISION_VOTES`  | `1`                   | Majority-vote passes per photo   |
+| `GEMINI_VISION_TEMPERATURE`| `0.0`                 | Sampling temperature for vision calls       |
+| `GEMINI_VISION_ZOOM`          | `false`               | Locate and crop part before inspecting      |
+| `GEMINI_VISION_VERIFY`        | `false`               | Close-up re-check & box refinement          |
+| `GEMINI_VISION_MAX_SIDE`      | `1536`                | Max image side sent to Gemini vision        |
+| `GEMINI_VISION_RETRIES`       | `3`                   | Retries with backoff on 429/5xx             |
 
-The Gemini key and model are optional when `REPORT_WRITER=template`.
+`GEMINI_API_KEY` and `GEMINI_MODEL` are optional only when both `DETECTOR=patchcore` and `REPORT_WRITER=template`.
 
 ## Testing
 
@@ -288,7 +296,7 @@ Current results:
 
 | Suite       | Result                                                |
 | ----------- | ----------------------------------------------------- |
-| Backend     | **255 passed**, **87% coverage**                      |
+| Backend     | **267 passed**, **82% coverage**                      |
 | Frontend    | **148 passed**, **93.8% statements / 85.7% branches** |
 | Lint/format | Ruff, Prettier and ESLint pass                        |
 | Types       | Pyright: 0 errors                                     |
@@ -334,6 +342,7 @@ cost.
 
 ## Limitations
 
+-- **Category gate depends on the active backend:** in `DETECTOR=gemini` mode, `GeminiCategoryClassifier` handles real-world out-of-scope parts; in `DETECTOR=patchcore` mode, OOD detection relies on `.npz` embedding similarity.
 - **Out-of-scope / OOD detection is not implemented.** PatchCore has no object
   classifier, so a random object may be scored as a defect rather than rejected
   as an unsupported image.
@@ -352,7 +361,8 @@ cost.
 
 - Run the backend with a **single Uvicorn worker** (`--workers 1`, the default).
 - **Gemini inspections and category checks** run concurrently across FastAPI's threadpool; **local PatchCore, embedding classifier, and faster-whisper inference** are serialized per model (one inference at a time per category/model).
-- There are **no user accounts**, so all users hitting the server share one inspection history and batch list stored in SQLite (WAL mode with `BEGIN IMMEDIATE` write retries).
+- Lazy model loaders and providers use double-checked locking, and SQLite runs in WAL mode with `BEGIN IMMEDIATE` write retries.
+- There are **no user accounts**, so all users hitting the server share one inspection history and batch list.
 
 ## Documentation
 

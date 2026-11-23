@@ -35,10 +35,10 @@ flowchart LR
     Services --> Data
   end
 
-  subgraph Models["AI / model layer"]
-    Gate["Embedding category gate<br/>timm wide_resnet50_2"]
-    PatchCore["PatchCore detector<br/>Anomalib · local"]
-    Whisper["faster-whisper<br/>local CPU int8"]
+subgraph Models["AI / model layer"]
+    Gate["Category gate<br/>Gemini vision (default) · timm fallback"]
+    Detector["Defect detector<br/>Gemini vision (default) · PatchCore fallback"]
+    Whisper["faster-whisper<br/>local CPU int8 (locked)"]
     Gemini["Gemini report writer<br/>optional API"]
     Template["Template report writer<br/>offline fallback"]
   end
@@ -50,7 +50,7 @@ flowchart LR
 
   Client -->|"HTTP multipart / JSON"| Routes
   Services --> Gate
-  Services --> PatchCore
+  Services --> Detector
   Services --> Whisper
   Services --> Gemini
   Services --> Template
@@ -78,8 +78,10 @@ flowchart LR
 | Service  | `Repository`                                                               | Parameterized SQLite persistence and history queries                                          |
 | Service  | `ArtifactStore`                                                            | Safe fixed file names for photos, overlays, thumbnails and PDFs                               |
 | Service  | `PDF builder`                                                              | ReportLab layout from a stored record                                                         |
-| Model    | `PatchCoreDetector`                                                        | Local Anomalib PatchCore inference: score, anomaly map, mask                                  |
-| Model    | `EmbeddingCategoryClassifier`                                              | Local timm embedding similarity to a category prototype                                       |
+| Model | `GeminiDetector`              | Concurrent Gemini vision inspection with optional zoom & close-up box refinement |
+| Model | `GeminiCategoryClassifier`    | Concurrent Gemini category check (ignores real-world background/lighting)        |
+| Model    | `PatchCoreDetector`                                                        | Local Optional local Anomalib PatchCore inference: score, anomaly map, mask (per-model lock)                                  |
+| Model    | `EmbeddingCategoryClassifier`                                              | Local Optional local timm embedding similarity to a `.npz` prototype (per-model lock) prototype                                       |
 | Model    | `FasterWhisperTranscriber`                                                 | Local speech-to-text                                                                          |
 | Model    | `GeminiReportWriter`                                                       | AI wording from facts, optional photo and sanitized transcript                                |
 | Model    | `TemplateReportWriter`                                                     | Deterministic offline wording and fallback                                                    |
@@ -96,7 +98,7 @@ sequenceDiagram
   participant API as FastAPI
   participant Gate as Category gate
   participant Voice as Whisper
-  participant Det as PatchCore
+  participant Det as Detector (Gemini/PatchCore)
   participant Rules
   participant Rep as ReportService
   participant DB as SQLite + files
@@ -105,7 +107,7 @@ sequenceDiagram
   O->>UI: photo + category + optional batch + optional voice note
   UI->>API: multipart POST /inspections
   API->>API: validate photo bytes, limits, audio bytes, duration, ids
-  API->>Gate: similarity(photo, chosen category)
+  API->>Gate: verify part (Gemini or embedding similarity)
   Gate-->>API: pass / category mismatch (422)
   opt voice note present
     API->>Voice: decode, silence check, transcribe
@@ -141,7 +143,7 @@ flowchart LR
   Backend --> DB[("SQLite<br/>/app/data/inspections.db")]
   Backend --> Uploads[("uploads<br/>/app/data/uploads")]
   Backend -.->|"first voice request"| HF[("Whisper cache<br/>/app/data/models-cache")]
-  Backend -->|"reads"| Models[("checkpoints + prototypes<br/>/app/results (read-only)")]
+  Backend -.->|"only if DETECTOR=patchcore"| Models[("checkpoints + prototypes<br/>/app/results (read-only)")]
 ```
 
 `docker compose up --build` starts both containers. The frontend nginx config
@@ -177,3 +179,4 @@ prompt, schema validation and number-grounding check enforce that invariant.
   deterministic template is always available.
 - **Boundary validation**: Pydantic plus real-byte checks protect every entry
   point, and all ids/paths are validated before touching the filesystem.
+- **Concurrency safety**: runs in a single Uvicorn worker; Gemini calls execute concurrently across threads while local PyTorch/Whisper models serialize inference per instance, lazy singletons use double-checked locking (`RLock`/`Lock`), and SQLite uses WAL mode with `BEGIN IMMEDIATE` retries.
